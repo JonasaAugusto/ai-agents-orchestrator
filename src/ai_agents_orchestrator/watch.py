@@ -91,11 +91,12 @@ def tarefa_padrao(cfg, chamar=None) -> int | None:
 def diff_stat(ws: str | None) -> str:
     if not ws or not Path(ws).is_dir():
         return ""
+    # The workspace belongs to the service user and Codex can write its .git/config: root reads it as that user
+    # (gitseguro.git_como_dono), never trusting it via safe.directory and never honouring its hooks/fsmonitor/helpers.
+    from .gitseguro import git_como_dono
     try:
-        r = subprocess.run(["git", "-c", "safe.directory=*", "-C", ws, "diff", "--stat", "HEAD"], capture_output=True,
-                           text=True, timeout=20)
-        c = subprocess.run(["git", "-c", "safe.directory=*", "-C", ws, "log", "--oneline", "-3"], capture_output=True,
-                           text=True, timeout=20)
+        r = git_como_dono(ws, ["diff", "--no-ext-diff", "--no-textconv", "--stat", "HEAD"], timeout=20)
+        c = git_como_dono(ws, ["log", "--no-show-signature", "--oneline", "-3"], timeout=20)
         return (r.stdout.strip() or "(no uncommitted changes)") + ("\nlatest commits:\n" + c.stdout.strip() if c.stdout.strip() else "")
     except (OSError, subprocess.TimeoutExpired):
         return ""

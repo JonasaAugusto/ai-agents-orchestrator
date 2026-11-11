@@ -55,7 +55,7 @@ class SemTelegramParaClaude(Base):
         acordadas = self._acordadas()
         self.assertEqual(len(acordadas), 1)
         self.assertIn(f"#{t['id']}", acordadas[0])
-        self.assertIn("completed", acordadas[0])
+        self.assertEqual(acordadas[0], f"Task #{t['id']} finished with status in review. Run `aao result {t['id']}`.")
 
     def test_origem_claude_bloqueada_tambem_acorda(self):
         self.codex.respostas = [lambda p, c: __import__("ai_agents_orchestrator.engines", fromlist=["x"]).Resultado(ok=False, erro="falhou", segundos=1)]
@@ -122,17 +122,19 @@ class PublicarPelaCli(Base):
         self.svc.ciclo_worker()
         self.tid = self.t_["id"]
 
-    def pub(self, tid=None, autorizado=True, euid=0):
+    def pub(self, tid=None, interativo=True, euid=0):
+        """The owner types the task id at an interactive terminal (the only way the CLI publishes)."""
         out = io.StringIO()
+        tid = tid or self.tid
         with mock.patch("os.geteuid", return_value=euid), redirect_stdout(out):
-            rc = cli._publicar(self.cfg, tid or self.tid, autorizado, root=self.root)
+            rc = cli._publicar(self.cfg, tid, root=self.root, interativo=interativo, entrada=lambda _p: str(tid))
         return rc, out.getvalue()
 
     def commits(self):
         return sh("git", "--git-dir", str(self.gh), "log", "--oneline", "main").count("\n")
 
-    def test_sem_flag_nao_publica(self):
-        rc, _ = self.pub(autorizado=False)
+    def test_sem_terminal_interativo_nao_publica(self):
+        rc, _ = self.pub(interativo=False)
         self.assertEqual(rc, 2)
         self.assertEqual(self.commits(), 1)
 

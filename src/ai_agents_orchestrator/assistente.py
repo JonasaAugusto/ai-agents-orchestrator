@@ -1,6 +1,7 @@
 """`aao setup`: interactive wizard that writes the config file and the root-only secrets file.
 
-- config.toml (mode 0644): non-secret settings;
+- config.toml (mode 0640, root:<service group>; 0600 root if that group does not exist yet): settings, including
+  the owner's chat id / phone number, so it is not world-readable;
 - env file (mode 0600, owner root): AAO_TELEGRAM_TOKEN and AAO_PUBLISH_KEY. The service gets it from systemd's
   EnvironmentFile, so the unprivileged service user (and Codex) cannot read it from disk.
 
@@ -46,7 +47,15 @@ def gerar_toml(r: dict) -> str:
     return "\n".join(linhas)
 
 
-def gravar(caminho: Path, texto: str, modo: int, dono_root: bool = True) -> None:
+def _gid(usuario: str) -> int | None:
+    import grp
+    try:
+        return grp.getgrnam(usuario).gr_gid
+    except KeyError:
+        return None
+
+
+def gravar(caminho: Path, texto: str, modo: int, dono_root: bool = True, grupo: int | None = None) -> None:
     caminho.parent.mkdir(parents=True, exist_ok=True)
     tmp = caminho.with_suffix(caminho.suffix + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, modo)
@@ -54,7 +63,7 @@ def gravar(caminho: Path, texto: str, modo: int, dono_root: bool = True) -> None
         f.write(texto)
     os.chmod(tmp, modo)
     if dono_root and os.geteuid() == 0:
-        os.chown(tmp, 0, 0)
+        os.chown(tmp, 0, 0 if grupo is None else grupo)
     os.replace(tmp, caminho)
 
 
@@ -125,10 +134,14 @@ class Assistente:
                 spec["source"] = self.pergunta("Local git checkout path")
             r["repos"][nome] = spec
         env["AAO_PUBLISH_KEY"] = secrets.token_hex(32)
-        gravar(self.config_file, gerar_toml(r), 0o644)
+        gid = _gid(r["user"])
+        modo_cfg = 0o640 if gid is not None else 0o600
+        gravar(self.config_file, gerar_toml(r), modo_cfg, grupo=gid)
         gravar(self.env_file, "".join(f"{k}={v}\n" for k, v in env.items()), 0o600)
         gravar(self.env_file.parent / "publish.key", env["AAO_PUBLISH_KEY"] + "\n", 0o600)  # read by the root daemon
-        s(f"\nWrote {self.config_file} (0644), {self.env_file} and {self.env_file.parent / 'publish.key'} (0600).")
+        s(f"\nWrote {self.config_file} ({modo_cfg:04o}" + ("" if gid is not None else
+          f"; after creating the user run: chgrp {r['user']} {self.config_file} && chmod 640 {self.config_file}")
+          + f"), {self.env_file} and {self.env_file.parent / 'publish.key'} (0600).")
         if r["channel"] == "whatsapp":
             self._parear(r)
         s("\nNext steps:")

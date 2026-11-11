@@ -43,7 +43,8 @@ flowchart LR
 3. **Entrega honesta**: o serviço (nunca o Codex) faz o commit, tira notas soltas do commit, sinaliza remoções grandes
    em documentos e testes que dependem de tempo, e lê a primeira linha do relatório: `Status: completed | partial | blocked`.
 4. **Revisão e publicação**: o Claude revisa; publicar (merge `--no-ff` na base) só com aprovação humana: botão
-   [Publish] ou `aao publish <id> --approved-by-owner`. Deploy em produção é um segundo botão, separado.
+   [Publish] ou `aao publish <id>` como root num terminal interativo (o dono digita o id da tarefa; só a flag não
+   publica). Deploy em produção é um segundo botão, separado.
 5. **Passagem de bastão no limite**: quando o Claude Code atinge o limite, um hook chama `aao claude-limit`; o Codex
    confere o briefing vivo contra a cauda mascarada do transcript e continua nos próprios branches.
 

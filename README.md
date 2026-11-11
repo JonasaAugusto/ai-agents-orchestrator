@@ -51,7 +51,8 @@ flowchart LR
    first line of the report: `Status: completed | partial | blocked`.
 4. **Review and publish.** Claude reviews the branch (see the [review protocol](#claude-code-plugin)). Publishing is a
    merge `--no-ff` into the base branch, only after a human approval: the owner's [Publish] button, or
-   `aao publish <id> --approved-by-owner` for tasks Claude delegated. Production deploys are a second, separate button.
+   `aao publish <id>` for tasks Claude delegated, run by the owner as root in an interactive terminal (they type the
+   task id to confirm; a flag alone never publishes). Production deploys are a second, separate button.
 5. **Usage-limit handoff.** When Claude Code hits its limit, a hook calls `aao claude-limit`. Codex checks Claude's
    living briefing against a masked tail of the transcript, proposes tasks, and (with `/auto` on) continues on its own
    branches. When the limit resets, Claude gets a note (and, optionally, a wake-up message) and takes the baton back.
@@ -79,13 +80,14 @@ flowchart LR
 | Codex runs as an unprivileged system user (`aao`) | it can only touch what that user can |
 | `--sandbox workspace-write`, network **off** | writes only inside the throwaway clone; `codex.network_access = true` to allow outbound network |
 | `danger-full-access` only with `codex.full_access = true` | explicit, warned opt-in; `aao doctor` flags it |
-| Publishing requires a human | button with HMAC-signed, expiring, single-use callback, or root CLI with `--approved-by-owner` |
+| Publishing requires a human | button with HMAC-signed, expiring, single-use callback, or root CLI where the owner types the task id at an interactive terminal |
 | Nothing is pushed unless allowlisted | `publish.push_allowlist` is empty by default |
 | Secrets stay out of the service user's reach | bot token and publish key come from a root-only 0600 `EnvironmentFile` |
-| Engines get a minimal environment | no tokens or keys in Codex's environment |
+| Engines get a minimal environment | no tokens or keys in Codex's environment; the service is non-dumpable and drops the secrets from its own environment at start |
+| Root never runs repo config it does not own | hardened git (no hooks, fsmonitor, helpers, proxies); mirrors are fetched into root-only clones and copied out |
 | One chat owner | every other chat, user or group is ignored without an answer |
 | Root daemon is optional and narrow | fixed operations, peer-uid check, refuses to start if its code is writable by non-root |
-| Claude session wake-up is off | experimental, uses an undocumented local socket format |
+| Claude session wake-up is off | experimental, uses an undocumented local socket format; it only sends a fixed notice (task id + state), never agent text |
 | Dev secrets are masked too | `privacy.mask_dev_secrets = true` by default |
 
 Read [SECURITY.md](SECURITY.md) for the threat model and how to report vulnerabilities.
@@ -112,7 +114,7 @@ sudo aao setup
 ```
 
 It asks for the service user, state directory, timezone, Claude Code transcripts folder, **the chat channel**
-(Telegram / WhatsApp / none) and the repositories, then writes `/etc/ai-agents-orchestrator/config.toml` (0644) and the
+(Telegram / WhatsApp / none) and the repositories, then writes `/etc/ai-agents-orchestrator/config.toml` (0640 root:<service group>) and the
 secrets file `/etc/ai-agents-orchestrator/env` plus `publish.key` (0600, root). For Telegram it tells you how to get
 the token (talk to **@BotFather**, `/newbot`) and **your numeric user id** (send any message to **@userinfobot**).
 
@@ -294,7 +296,7 @@ Every command is `aao <command>` (also installed as `ai-agents-orchestrator`). P
 | `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID`, `cancel ID`, `claim ID [--owner] [--files]` | board |
 | `wait ID [--timeout S]` | block until a final state (exit 0 review/completed, 1 blocked/cancelled, 2 timeout) |
 | `review --repo R --branch B` | cross-review by Codex (read-only) |
-| `publish ID --approved-by-owner` | root only: merge + push a reviewed task delegated by Claude |
+| `publish ID` | root only, interactive terminal: the owner types the task id to merge + push a reviewed task delegated by Claude |
 | `watch [ID] [--no-follow]`, `watch-open [ID]` | live view |
 | `status`, `pause`, `resume` | service state and queue |
 | `arm`, `disarm` | automatic handoff on Claude's usage limit |

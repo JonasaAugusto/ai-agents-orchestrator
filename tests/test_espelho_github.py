@@ -25,7 +25,7 @@ class EspelhoGithubTest(unittest.TestCase):
             velha = repo_com(d, "velha", "velho.py")      # copia local desatualizada
             gh = repo_com(d, "gh", "filtros.py")            # "GitHub" atual
             spec = {"github": "X/y", "fonte": str(velha), "branch_base": "main"}
-            cfg = Config(state_dir=d / "st", repos={"r": spec})
+            cfg = Config(state_dir=d / "st", root_state=d / "root", repos={"r": spec})
             with mock.patch.object(espelho, "_url_github", lambda s: str(gh)):
                 st = espelho.atualizar_repos(cfg)
             self.assertTrue(st["r"]["ok"])

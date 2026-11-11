@@ -3,6 +3,26 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] - 2026-11-11
+
+### Security
+- Root no longer runs git with `safe.directory=*` in service-owned repositories, where repo config/hooks
+  (`core.fsmonitor`, `core.hooksPath`, `credential.helper=!cmd`, `core.gitProxy`, `url.*.insteadOf`) could execute
+  code as root. New hardened git helper (no system/global config, exec-capable keys overridden, local transport
+  only); mirrors are fetched into root-only bare clones (`<root_state_dir>/mirror`) and copied out to the service;
+  `aao watch` and `aao install` read other users' checkouts as their owner.
+- The service marks itself non-dumpable (`PR_SET_DUMPABLE=0`) and drops `AAO_TELEGRAM_TOKEN` / `AAO_PUBLISH_KEY`
+  from its environment at start, so same-uid engines cannot read them from `/proc/<pid>/environ`. Example systemd
+  units gain extra compatible hardening; running engines under a separate uid is documented as recommended.
+- Workspace git outside the sandbox always disables hooks, fsmonitor, credential helpers and proxies, and refuses to
+  deliver when the workspace `.git/config` holds keys outside an allowlist (e.g. a planted filter driver).
+- `aao publish <id>` requires the owner to type the task id in an interactive terminal; the self-attested
+  `--approved-by-owner` flag alone no longer publishes (kept only as a deprecated, ignored option).
+- The experimental wake-up sends a fixed notice built by the root daemon ("Task #N finished with status X. Run
+  `aao result N`."); agent-authored text is never posted into the Claude session, and free text sent to the
+  daemon's socket is rejected.
+- `aao setup` writes `config.toml` as 0640 root:<service group> (0600 when the group does not exist) instead of 0644.
+
 ## [1.0.0] - 2026-11-11
 
 First public release.

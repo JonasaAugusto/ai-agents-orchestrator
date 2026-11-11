@@ -17,12 +17,13 @@ import grp
 import json
 import os
 import pwd
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import sanitize
+from . import gitseguro, sanitize
 from .config import Config
 
 USUARIO = "aao"  # replaced by cfg.service_user (see _ids)
@@ -157,9 +158,19 @@ def _fonte_repo(spec: dict) -> Path | str | None:
 
 
 def _git(args: list[str], cwd: Path | None = None, timeout: int = 300) -> subprocess.CompletedProcess:
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": "/root", "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C.UTF-8"}
-    return subprocess.run(["git", "-c", "safe.directory=*", *args], cwd=cwd, env=env, capture_output=True,
-                          text=True, timeout=timeout)
+    """git in a repository the CALLER owns (root: its private mirror in root_state). Root's global config applies
+    (credential helper for private GitHub repos); hooks, fsmonitor and ext:: stay disabled."""
+    return gitseguro.git_confiavel(args, cwd=cwd, timeout=timeout)
+
+
+def _git_local(args: list[str], cwd: Path | None = None, timeout: int = 300) -> subprocess.CompletedProcess:
+    """git that reads a local source repository that may belong to someone else: hardened (no system/global
+    config, no hooks/helpers/proxies, local transport only)."""
+    return gitseguro.git_endurecido(args, cwd=cwd, timeout=timeout)
+
+
+def _como_root() -> bool:
+    return os.geteuid() == 0
 
 
 def _url_github(spec: dict) -> str | None:
@@ -183,8 +194,9 @@ def _sha_origem(spec: dict, url: str | None, base: str) -> str | None:
     fonte = _fonte_repo(spec)
     if not fonte or str(fonte).startswith(("http://", "https://")):
         return None
-    f = Path(str(fonte))
-    return _sha_ref(f / ".git" if (f / ".git").exists() else f, base)
+    r = _git_local(["ls-remote", str(fonte), f"refs/heads/{base}"], timeout=60)
+    linha = r.stdout.split() if r.returncode == 0 else []
+    return linha[0] if linha else None
 
 
 def _com_sha(spec: dict, dst: Path, st: dict, url: str | None) -> dict:
@@ -219,24 +231,25 @@ def _atualizar_um_bruto(spec: dict, dst: Path) -> dict:
         if r.returncode == 0:
             _git(["--git-dir", str(dst), "symbolic-ref", "HEAD", f"refs/heads/{base}"])
             if spec.get("fonte") and _fonte_repo({"fonte": spec["fonte"]}):
-                _git(["--git-dir", str(dst), "fetch", "-q", "--force", str(spec["fonte"]),
-                      "+refs/heads/*:refs/heads/local-src/*"])
+                _git_local(["--git-dir", str(dst), "fetch", "-q", "--force", "--no-tags", str(spec["fonte"]),
+                            "+refs/heads/*:refs/heads/local-src/*"])
             return {"ok": True, "fonte": "github", "atualizado": agora_iso()}
         erro_rede = sanitize.mascarar(r.stderr)[:200]
         fonte = _fonte_repo(spec)
         if not fonte or not dst.exists():
             return {"ok": False, "motivo": "GitHub unavailable: " + erro_rede, "fonte": "github"}
         # no network: fall back to the local copy, but flag it as possibly stale
-        r2 = _git(["--git-dir", str(dst), "fetch", "-q", "--force", str(fonte), "+refs/heads/*:refs/heads/local-src/*"])
+        r2 = _git_local(["--git-dir", str(dst), "fetch", "-q", "--force", "--no-tags", str(fonte),
+                         "+refs/heads/*:refs/heads/local-src/*"])
         return {"ok": r2.returncode == 0, "fonte": Path(str(fonte)).name, "desatualizado": True,
                 "motivo": "GitHub unavailable, using local copy: " + erro_rede, "atualizado": agora_iso()}
     fonte = _fonte_repo(spec)
     if not fonte:
         return {"ok": False, "motivo": "local source unavailable"}
     if not dst.exists():
-        r = _git(["clone", "--mirror", "--no-hardlinks", str(fonte), str(dst)])
+        r = _git_local(["clone", "--mirror", "--no-hardlinks", str(fonte), str(dst)])
     else:
-        r = _git(["--git-dir", str(dst), "fetch", "--prune", "--force", str(fonte), "+refs/*:refs/*"])
+        r = _git_local(["--git-dir", str(dst), "fetch", "--prune", "--force", str(fonte), "+refs/*:refs/*"])
     ok = r.returncode == 0
     st = {"ok": ok, "fonte": Path(str(fonte)).name, "atualizado": agora_iso()}
     if not ok:
@@ -247,24 +260,76 @@ def _atualizar_um_bruto(spec: dict, dst: Path) -> dict:
     return st
 
 
+def _privado(cfg: Config, nome: str) -> Path:
+    """Root's private bare mirror (root_state/mirror, 0700). git only ever runs as root HERE: never in the copy the
+    service owns, whose config/hooks the service (and Codex, same uid) could have rewritten."""
+    base = cfg.root_state / "mirror"
+    base.mkdir(parents=True, exist_ok=True)
+    os.chmod(cfg.root_state, 0o700)
+    os.chmod(base, 0o700)
+    return base / f"{nome}.git"
+
+
+def _abrir_dir_root(caminho: Path, gid: int | None) -> int:
+    """Opens the repos dir without following a symlink and makes it root:<group> 0750, so the service cannot add,
+    rename or swap entries while root works in it. Returns a directory fd (use /proc/self/fd/<fd>/...)."""
+    caminho.mkdir(parents=True, exist_ok=True)
+    fd = os.open(caminho, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    os.fchown(fd, 0, gid if gid is not None else 0)
+    os.fchmod(fd, 0o750)
+    return fd
+
+
+def _exportar(priv: Path, fd_pai: int, nome: str, uid: int | None, gid: int | None) -> None:
+    """Publishes a fresh copy of root's private mirror as <repos_dir>/<nome>, owned by the service. Built in a
+    root-only 0700 staging dir (the service cannot reach it until it is complete), then swapped in by rename; the
+    old copy (possibly tampered with) is deleted without following symlinks. Nothing of it is read by git as root."""
+    pai = Path(f"/proc/self/fd/{fd_pai}")
+    tmp, velho = f".{nome}.novo-{os.getpid()}", f".{nome}.velho-{os.getpid()}"
+    for n in (tmp, velho):
+        if os.path.lexists(pai / n):
+            shutil.rmtree(pai / n) if not os.path.islink(pai / n) else os.unlink(pai / n)
+    os.mkdir(pai / tmp, 0o700)
+    shutil.copytree(priv, pai / tmp, symlinks=True, dirs_exist_ok=True)
+    os.chmod(pai / tmp, 0o700)
+    if uid is not None:
+        for raiz, dirs, arqs in os.walk(pai / tmp):
+            for n in dirs + arqs:
+                os.chown(os.path.join(raiz, n), uid, gid if gid is not None else -1, follow_symlinks=False)
+        os.chown(pai / tmp, uid, gid if gid is not None else -1, follow_symlinks=False)
+    os.chmod(pai / tmp, 0o750)
+    if os.path.lexists(pai / nome):
+        os.rename(pai / nome, pai / velho)
+    os.rename(pai / tmp, pai / nome)
+    if os.path.lexists(pai / velho):
+        shutil.rmtree(pai / velho) if not os.path.islink(pai / velho) else os.unlink(pai / velho)
+
+
 def atualizar_repos(cfg: Config, nomes: list[str] | None = None) -> dict:
+    """Refreshes the bare mirrors. As root: fetch into root's private mirror, then export a copy to the service.
+    As the service user (no root daemon): directly in its own copies."""
     uid, gid = _ids(cfg.service_user)
-    cfg.repos_dir.mkdir(parents=True, exist_ok=True)
-    _dono(cfg.repos_dir, uid, gid, 0o750)
+    root = _como_root()
+    if root:
+        fd = _abrir_dir_root(cfg.repos_dir, gid)
+    else:
+        cfg.repos_dir.mkdir(parents=True, exist_ok=True)
+        fd = None
     status: dict = {}
-    for nome, spec in cfg.repos.items():
-        if nomes and nome not in nomes:
-            continue
-        dst = cfg.repos_dir / f"{nome}.git"
-        try:
-            status[nome] = _atualizar_um(spec, dst)
-        except (subprocess.TimeoutExpired, OSError) as e:
-            status[nome] = {"ok": False, "motivo": type(e).__name__}
-        if dst.exists() and uid is not None:
-            for raiz, _dirs, arqs in os.walk(dst):
-                _dono(Path(raiz), uid, gid)
-                for a in arqs:
-                    _dono(Path(raiz) / a, uid, gid)
+    try:
+        for nome, spec in cfg.repos.items():
+            if nomes and nome not in nomes:
+                continue
+            dst = _privado(cfg, nome) if root else cfg.repos_dir / f"{nome}.git"
+            try:
+                status[nome] = _atualizar_um(spec, dst)
+                if root and dst.exists():
+                    _exportar(dst, fd, f"{nome}.git", uid, gid)
+            except (subprocess.TimeoutExpired, OSError, shutil.Error) as e:
+                status[nome] = {"ok": False, "motivo": type(e).__name__}
+    finally:
+        if fd is not None:
+            os.close(fd)
     _gravar(cfg.mirror / "repos-status.json", json.dumps(status, ensure_ascii=False, indent=1), gid)
     return status
 

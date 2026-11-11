@@ -77,10 +77,10 @@ def criar_canal(cfg):
     return None
 
 
-def montar_servico(cfg, dry_run: bool, sem_telegram: bool):
+def montar_servico(cfg, dry_run: bool, sem_telegram: bool, chave: str | None = None):
     cfg.preparar_dirs()
     estado, quadro = Estado(cfg.db_estado), Quadro(cfg.db_quadro)
-    chave = os.environ.get("AAO_PUBLISH_KEY", "")
+    chave = os.environ.get("AAO_PUBLISH_KEY", "") if chave is None else chave
     if dry_run:
         from .testing import CodexFalso, RootFalso
         codex, claude, root = CodexFalso(cfg.state_dir), None, RootFalso()
@@ -125,14 +125,27 @@ def _hook_prompt(cfg, evento: str) -> int:
     return 0
 
 
-def _publicar(cfg, tid: int, autorizado: bool, chave_arq: Path | None = None, root=None) -> int:
+def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = None, root=None,
+              interativo: bool | None = None, entrada=input) -> int:
     """Publishes (merge --no-ff into the base + push, via the root daemon) a task delegated by Claude. Root only, and
-    only after the owner approved it explicitly."""
-    if not autorizado:
-        print("refused: confirm with --approved-by-owner (only after the owner approved it)")
-        return 2
+    only with the owner's confirmation typed in an interactive terminal (the task id). The `--approved-by-owner`
+    flag is self-attested (an agent can pass it), so on its own it no longer publishes anything."""
     if os.geteuid() != 0:
         print("refused: must run as root")
+        return 2
+    if interativo is None:
+        interativo = sys.stdin.isatty() and sys.stdout.isatty()
+    if not interativo:
+        print("refused: publishing from the CLI needs the owner at an interactive terminal (type the task id to "
+              "confirm). --approved-by-owner alone is not accepted; tasks from the chat use the [Publish] button.")
+        return 2
+    try:
+        digitado = (entrada(f"Publish task #{tid} (merge into the base branch + push)? Type the task id to confirm: ")
+                    or "").strip()
+    except EOFError:
+        digitado = ""
+    if digitado != str(tid):
+        print("refused: confirmation did not match the task id")
         return 2
     quadro = Quadro(cfg.db_quadro)
     t = quadro.ver(tid)
@@ -171,8 +184,10 @@ def instalar(origem: Path, destino: Path, exigir_root: bool = True) -> int:
     import tempfile
     if exigir_root and os.geteuid() != 0:
         print("install: root only (and after review)"); return 1
-    def g(*a):
-        return subprocess.run(["git", "-c", "safe.directory=*", "-C", str(origem), *a], capture_output=True, text=True)
+    from .gitseguro import git_como_dono
+
+    def g(*a):  # root never honours the checkout's own config: it reads it as the checkout's owner, hardened
+        return git_como_dono(origem, list(a))
     if g("rev-parse", "--is-inside-work-tree").returncode != 0:
         print(f"install: {origem} is not a git repository"); return 1
     if g("branch", "--show-current").stdout.strip() != "main":
@@ -186,8 +201,8 @@ def instalar(origem: Path, destino: Path, exigir_root: bool = True) -> int:
             presentes = set(g("ls-tree", "--name-only", "HEAD").stdout.split())
             pastas = [n for n in ("src", "rules", "templates", "examples", "README.md", "pyproject.toml", "LICENSE")
                       if n in presentes]
-            r = subprocess.run(["git", "-c", "safe.directory=*", "-C", str(origem), "archive", "--format=tar", "HEAD", *pastas],
-                               stdout=f, stderr=subprocess.PIPE)
+            r = git_como_dono(origem, ["archive", "--format=tar", "HEAD", *pastas], timeout=300, stdout=f,
+                              stderr=subprocess.PIPE, text=False)
         if r.returncode != 0:
             print("install: git archive failed: " + r.stderr.decode()[-200:]); return 1
         novo = destino.with_name(destino.name + ".new")
@@ -319,10 +334,11 @@ def parser() -> argparse.ArgumentParser:
     rv.add_argument("--repo", required=True)
     rv.add_argument("--branch", required=True)
     rv.add_argument("--title", "--titulo", dest="titulo")
-    pb = _sub(sp, "publish", "publicar", help="merge + push a reviewed task delegated by Claude (root, owner-approved)")
+    pb = _sub(sp, "publish", "publicar", help="merge + push a reviewed task delegated by Claude (root, owner types "
+                                               "the task id in an interactive terminal)")
     pb.add_argument("id", type=int)
     pb.add_argument("--approved-by-owner", "--autorizado-pelo-dono", dest="autorizado", action="store_true",
-                    help="confirms the owner explicitly approved publishing")
+                    help="deprecated, ignored: the owner must confirm interactively")
     cl = _sub(sp, "claim", "reivindicar", help="take a task (default owner: claude)")
     cl.add_argument("id", type=int)
     cl.add_argument("--owner", "--dono", dest="dono", default="claude", choices=["claude", "codex"])
@@ -356,7 +372,12 @@ def main(argv=None) -> int:
             print(f"Opened the live Codex view ({como}): {linha}")
         return 0
     if cmd == "serve":
-        svc = montar_servico(cfg, a.dry_run, a.sem_canal)
+        # the config (token) is already in memory; keep the HMAC key in memory, mark the process non-dumpable and
+        # drop both secrets from the environment so same-uid engines cannot read /proc/<pid>/environ
+        from . import seguranca
+        chave = os.environ.get("AAO_PUBLISH_KEY", "")
+        chave = seguranca.proteger_processo().get("AAO_PUBLISH_KEY", chave)
+        svc = montar_servico(cfg, a.dry_run, a.sem_canal, chave=chave)
         svc.rodar()
         return 0
     if cmd == "root-daemon":

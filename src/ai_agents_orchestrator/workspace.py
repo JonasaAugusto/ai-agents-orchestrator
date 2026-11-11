@@ -18,6 +18,27 @@ class GitErro(Exception):
     pass
 
 
+# Workspace git runs OUTSIDE Codex's sandbox while Codex can write the workspace's .git/config: never honour hooks,
+# fsmonitor, credential helpers, proxies or the ext:: transport from it (command-line config wins over repo config).
+ENDURECER_WS = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=",
+                "-c", "core.gitProxy=", "-c", "protocol.ext.allow=never", "-c", "log.showSignature=false")
+# Keys a workspace .git/config may contain. Anything else (filter/diff/merge drivers, include*, core.* commands,
+# url.*.insteadOf, extensions.worktreeConfig...) could make git run code: the delivery is refused.
+RX_CONFIG_OK = re.compile(
+    r"^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|"
+    r"eol|safecrlf)|extensions\.(objectformat|refstorage)|remote\.(origin|github)\.(url|fetch)|"
+    r"branch\..+\.(remote|merge|rebase)|user\.(name|email)|commit\.gpgsign|gc\.auto|pull\.(rebase|ff)|"
+    r"init\.defaultbranch|index\.(version|threads)|color\.[a-z.]+|advice\.[a-z]+)$")
+
+
+def verificar_config_ws(cfg: Config, ws: Path) -> None:
+    """Raises GitErro if the workspace's local config holds a key outside the allowlist (planted by the agent)."""
+    r = git(cfg, ["config", "--local", "--no-includes", "--name-only", "--list"], ws, check=False)
+    ruins = sorted({k for k in r.stdout.splitlines() if k and not RX_CONFIG_OK.match(k.lower())})
+    if ruins:
+        raise GitErro("unsafe workspace .git/config (keys that can run code outside the sandbox): " + ", ".join(ruins[:6]))
+
+
 def slug(texto: str, n: int = 30) -> str:
     t = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode().lower()
     return (re.sub(r"[^a-z0-9]+", "-", t).strip("-")[:n].strip("-")) or "task"
@@ -38,7 +59,7 @@ def git(cfg: Config, args: list[str], cwd: Path | str | None = None, repo: str |
         check: bool = True, timeout: int = 300) -> subprocess.CompletedProcess:
     if any(RX_PERIGO.match(a) for a in args if a[:1] in "-+:"):
         raise GitErro(f"forbidden git argument: {' '.join(args)[:80]}")
-    r = subprocess.run(["git", "-c", "safe.directory=*", *args], cwd=cwd, env=env_git(cfg, repo), capture_output=True,
+    r = subprocess.run(["git", *ENDURECER_WS, *args], cwd=cwd, env=env_git(cfg, repo), capture_output=True,
                        text=True, timeout=timeout)
     if check and r.returncode != 0:
         raise GitErro((r.stderr or r.stdout).strip()[-300:])
@@ -179,6 +200,7 @@ def finalizar(cfg: Config, ws: Path, repo: str, tid: int, titulo: str, base: str
     """Commit (if anything changed), patches, file summary and HANDOFF.md in resultados/<id>/."""
     out = cfg.resultados / str(tid)
     out.mkdir(parents=True, exist_ok=True)
+    verificar_config_ws(cfg, ws)
     branch = git(cfg, ["rev-parse", "--abbrev-ref", "HEAD"], ws).stdout.strip()
     sujo = git(cfg, ["status", "--porcelain"], ws).stdout.strip()
     excluidos: list[str] = []
@@ -364,6 +386,11 @@ def commit_chat(cfg: Config, ws: Path, tid: int, base: str, mensagem: str) -> di
     (stray notes out of the commit) plus a secret scan. {"mudou", "bloqueado": [...], "arquivos", "excluidos"}."""
     out = cfg.resultados / str(tid)
     out.mkdir(parents=True, exist_ok=True)
+    try:
+        verificar_config_ws(cfg, ws)
+    except GitErro as e:
+        auditar(cfg, "commit-chat", ws.parent.name, "", resultado="blocked", extra=str(e))
+        return {"mudou": False, "bloqueado": [str(e)], "arquivos": [], "excluidos": []}
     if not git(cfg, ["status", "--porcelain"], ws).stdout.strip():
         return {"mudou": False, "bloqueado": [], "arquivos": [], "excluidos": []}
     git(cfg, ["add", "-A"], ws)

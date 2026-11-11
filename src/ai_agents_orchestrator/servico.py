@@ -153,14 +153,14 @@ class Servico:
             return None
         return self.notificar(texto, botoes, ref=t.get('id'))
 
-    def avisar_claude_fim(self, t: dict, texto: str) -> None:
-        """A task delegated by Claude finished (or got stuck): wake its session right away (EXPERIMENTAL, opt-in)."""
+    def avisar_claude_fim(self, t: dict, estado: str) -> None:
+        """A task delegated by Claude finished (or got stuck): wake its session right away (EXPERIMENTAL, opt-in).
+        Only the task id and its board state are sent; the root daemon writes the fixed notice. No agent-authored
+        text (report, summary, error) ever reaches the Claude session this way."""
         if t.get("origem") != ORIGEM_CLAUDE or not self.cfg.claude_wakeup:
             return
-        corpo = (f"Codex task #{t.get('id')} finished. Review it with `{CLI} result {t.get('id')}` "
-                 f"and follow the plan.\n\n{texto[:1500]}")
         try:
-            r = self.root.acordar_claude(corpo)
+            r = self.root.acordar_claude("fim", tid=int(t.get("id")), estado=estado)
         except Exception as e:  # extra notice: never brings the worker down
             r = {"ok": False, "erro": type(e).__name__}
         if not r.get("ok"):
@@ -665,7 +665,7 @@ class Servico:
             self.estado.set("pausado", True)
             self.quadro.atualizar(tid, estado="pendente", erro="Codex has no valid login")
             self.notificar_tarefa(t, self.msg_relogin() + " Queue paused; resume it with /resume after logging in.")
-            self.avisar_claude_fim(t, "Codex has no valid login; queue paused until the owner logs in again.")
+            self.avisar_claude_fim(t, "pendente")
             return
         if res.cancelado:
             if self.parando:
@@ -684,7 +684,7 @@ class Servico:
             (out / "resumo.txt").write_text(narrativa, encoding="utf-8")
             self.quadro.atualizar(tid, estado="concluida", resumo=narrativa[:4000], fim=self.agora(), visto_claude=0)
             self.notificar_tarefa(t, f"Review #{tid} ready ({t['alvo']}):\n{narrativa[:1500]}")
-            self.avisar_claude_fim(t, f"Review ready ({t['alvo']}):\n{narrativa}")
+            self.avisar_claude_fim(t, "concluida")
             self.gerar_recado()
             return
         # honest state: exit code 0 but a report declaring blocked/partial is NOT completion
@@ -698,7 +698,7 @@ class Servico:
         except workspace.GitErro as e:
             self.quadro.atualizar(tid, estado="bloqueada", erro=str(e)[:300])
             self.notificar_tarefa(t, f"#{tid}: failed to record the result: {e}")
-            self.avisar_claude_fim(t, f"Failed to record the result: {e}")
+            self.avisar_claude_fim(t, "bloqueada")
             return
         avisos = []
         narrativa = info.get("narrativa", narrativa)
@@ -727,7 +727,7 @@ class Servico:
                f"{('Warning: ' + aviso + chr(10)) if aviso else ''}\n{narrativa[:1200]}")
         if t.get("origem") == ORIGEM_CLAUDE:  # no buttons, no chat: Claude is notified and publishes via the CLI after review
             self.notificar_tarefa(t, txt)
-            self.avisar_claude_fim(t, txt)
+            self.avisar_claude_fim(t, "bloqueada" if bloqueada else "em_revisao")
             return
         if not bloqueada:
             if rel == "parcial":
@@ -891,10 +891,7 @@ class Servico:
         if agora < cl["reset_epoch"] + 60 or cl["acordadas"] >= 3 or agora - cl["ultima_acordada"] < 1800:
             return False
         self.gerar_recado()
-        texto = ("Claude's usage limit should be renewed. Codex kept developing meanwhile. "
-                 f"Read {self.cfg.para_claude}/HANDOFF-PARA-CLAUDE.md, run `{CLI} claude-resumed` "
-                 "and split the work with Codex (it can keep working on tasks in parallel).")
-        r = self.root.acordar_claude(texto) if self.cfg.claude_wakeup else {"ok": False, "erro": "wake-up disabled"}
+        r = self.root.acordar_claude("volta") if self.cfg.claude_wakeup else {"ok": False, "erro": "wake-up disabled"}
         primeira = not cl.get("avisado_volta")
         cl.update(acordadas=cl["acordadas"] + 1, ultima_acordada=agora, avisado_volta=True, ultimo_acordar=r)
         self.estado.set("claude_limite", cl)

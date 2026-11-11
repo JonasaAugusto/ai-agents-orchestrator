@@ -109,7 +109,7 @@ class Sincronizacao(Base):
             (gh / "a.py").write_text("x")
             sh("git", "add", "-A", cwd=gh)
             sh("git", "commit", "-q", "-m", "c", cwd=gh)
-            cfg = Config(state_dir=d / "st", repos={"r": {"github": "X/y", "branch_base": "main"}})
+            cfg = Config(state_dir=d / "st", root_state=d / "root", repos={"r": {"github": "X/y", "branch_base": "main"}})
             with mock.patch.object(espelho, "_url_github", lambda s: str(gh)):
                 st = espelho.atualizar_repos(cfg)["r"]
             self.assertTrue(st["ok"])

@@ -56,7 +56,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.dir = Path(self.tmp.name)
-        self.cfg = config.Config(state_dir=self.dir / "state", token=TOKEN, chat_id=CHAT, channel="telegram")
+        self.cfg = config.Config(state_dir=self.dir / "state", root_state=self.dir / "root-state", token=TOKEN, chat_id=CHAT, channel="telegram")
         self.cfg.claude_wakeup = True  # the experimental wake-up is exercised by the tests (default is off)
         self.cfg.preparar_dirs()
         self.cfg.mirror.mkdir(exist_ok=True)

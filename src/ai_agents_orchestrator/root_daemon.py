@@ -2,8 +2,9 @@
 fixed set of operations and nothing else:
 
   espelhar / espelhar_repo -> refresh the mirror (transcript tail, memory, bare repos)
-  acordar_claude           -> EXPERIMENTAL: post a message into the interactive Claude Code session socket
-                              (undocumented local format; disabled unless claude.wakeup_enabled = true)
+  acordar_claude           -> EXPERIMENTAL: post a FIXED notice (built here, never agent-authored text) into the
+                              interactive Claude Code session socket (undocumented local format; disabled unless
+                              claude.wakeup_enabled = true)
   push                     -> push an `agent/*` branch (or, with a signed request, merge into the base) using ROOT's
                               git credential; the token never leaves root (see `push()`); only repos whose GitHub
                               slug is in publish.push_allowlist
@@ -29,8 +30,8 @@ import time
 import uuid
 from pathlib import Path
 
-from . import config, espelho
-from .config import Config
+from . import config, espelho, gitseguro
+from .config import CLI, Config
 
 MANIFESTO = Config().publish_manifest  # replaced by cfg.publish_manifest at runtime
 CHAVE = Config().publish_key_file
@@ -104,6 +105,30 @@ def acordar_claude(corpo: str, nome: str | None = None, sessoes: Path = SESSOES)
     except OSError as e:
         return {"ok": False, "erro": type(e).__name__}
     return {"ok": True, "sessao": s.get("name") or s.get("sessionId")}
+
+
+ESTADOS_AVISO = {"pendente": "pending", "em_andamento": "in progress", "em_revisao": "in review",
+                 "concluida": "completed", "bloqueada": "blocked", "cancelada": "cancelled"}
+
+
+def texto_acordar(cfg: Config, req: dict) -> str | None:
+    """The ONLY texts the daemon ever posts into the Claude session. Built here from validated fields; nothing written
+    by an agent (reports, summaries, free text from the socket) is ever forwarded. None = invalid request."""
+    tipo = req.get("tipo")
+    if tipo == "fim":
+        try:
+            tid = int(req.get("tid"))
+        except (TypeError, ValueError):
+            return None
+        estado = ESTADOS_AVISO.get(str(req.get("estado")))
+        if tid <= 0 or not estado:
+            return None
+        return f"Task #{tid} finished with status {estado}. Run `{CLI} result {tid}`."
+    if tipo == "volta":
+        return ("Claude's usage limit should be renewed. Codex kept developing meanwhile. "
+                f"Read {cfg.para_claude}/HANDOFF-PARA-CLAUDE.md, run `{CLI} claude-resumed` "
+                "and split the work with Codex (it can keep working on tasks in parallel).")
+    return None
 
 
 # ---------------------------------------------------------------- publicar
@@ -195,8 +220,14 @@ def _env_push(cfg: Config) -> dict:
 
 
 def _git(cfg: Config, args: list[str], cwd: str | Path | None = None, timeout: int = 180) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-c", "safe.directory=*", "-c", "protocol.file.allow=user", "-c", "core.hooksPath=/dev/null", *args],
-                          cwd=cwd, env=_env_push(cfg), capture_output=True, text=True, timeout=timeout)
+    """git in ROOT's own bare clone (root_state, 0700): root's global config applies (credential helper)."""
+    return gitseguro.git_confiavel(args, cwd=cwd, env=_env_push(cfg), timeout=timeout)
+
+
+def _git_do_workspace(cfg: Config, args: list[str], cwd: str | Path | None = None, timeout: int = 180) -> subprocess.CompletedProcess:
+    """git that reads the service-owned workspace (fetch from it): no system/global config, every exec-capable key
+    overridden, local transport only. Nothing from the workspace .git/config can run code as root."""
+    return gitseguro.git_endurecido(args, cwd=cwd, env=_env_push(cfg), timeout=timeout)
 
 
 def url_do_repo(cfg: Config, repo: str) -> str | None:
@@ -271,7 +302,8 @@ def push(cfg: Config, req: dict, chave: bytes = b"", agora: float | None = None)
             _git(cfg, ["init", "--bare", "-q", str(root_git)])
         # 1) fetch the workspace commit into root's clone (objects only; nothing from the workspace .git/config applies)
         inc = f"refs/incoming/{tid}"
-        f = _git(cfg, ["fetch", "-q", "--no-tags", "--no-write-fetch-head", str(ws / ".git"), f"+refs/heads/{branch}:{inc}"], root_git)
+        f = _git_do_workspace(cfg, ["fetch", "-q", "--no-tags", "--no-write-fetch-head", str(ws / ".git"),
+                                    f"+refs/heads/{branch}:{inc}"], root_git)
         if f.returncode != 0:
             return negar("branch not found in the workspace")
         sha = _git(cfg, ["rev-parse", inc], root_git).stdout.strip()
@@ -325,7 +357,10 @@ def processar(cfg: Config, req: dict, peer_uid: int, uid_agente: int | None, cha
     if op == "acordar_claude":
         if not cfg.claude_wakeup:
             return {"ok": False, "erro": "claude wake-up disabled (claude.wakeup_enabled = false)"}
-        return acordar_claude(str(req.get("texto", "")), nome=cfg.claude_session_name or None, sessoes=cfg.claude_sessions_dir)
+        corpo = texto_acordar(cfg, req)
+        if corpo is None:
+            return {"ok": False, "erro": "invalid wake-up request"}
+        return acordar_claude(corpo, nome=cfg.claude_session_name or None, sessoes=cfg.claude_sessions_dir)
     if op == "publicar":
         return publicar(cfg, req, chave)
     if op == "push":
@@ -342,6 +377,8 @@ def servir(cfg: Config, caminho: str | None = None, checar_codigo: bool = True) 
         ruim = config.codigo_inseguro()
         if ruim:  # the agent may edit this project only in a workspace; what runs as root comes from a root-owned copy
             raise SystemExit("refused: root daemon code is not root-owned / writable only by root: " + ", ".join(ruim))
+    from . import seguranca
+    seguranca.proteger_processo()
     try:
         uid_agente = pwd.getpwnam(cfg.service_user).pw_uid
     except KeyError:
@@ -421,8 +458,9 @@ class RootClient:
         """Refreshes only one repo's bare mirror (current GitHub state) before creating a workspace."""
         return self.chamar({"op": "espelhar_repo", "repo": repo}, 330)
 
-    def acordar_claude(self, texto: str) -> dict:
-        return self.chamar({"op": "acordar_claude", "texto": texto}, 30)
+    def acordar_claude(self, tipo: str, tid: int | None = None, estado: str | None = None) -> dict:
+        """tipo "fim" (task tid ended in `estado`) or "volta" (usage limit renewed). The daemon writes the text."""
+        return self.chamar({"op": "acordar_claude", "tipo": tipo, "tid": tid, "estado": estado}, 30)
 
     def info(self, repo: str) -> dict:
         return self.chamar({"op": "info", "repo": repo}, 10)
