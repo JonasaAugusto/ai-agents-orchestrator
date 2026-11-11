@@ -1,0 +1,46 @@
+# Example unit - adapt paths/user. Install: cp to /etc/systemd/system/, then systemctl daemon-reload.
+[Unit]
+Description=ai-agents-orchestrator (Codex worker, task board, chat channel)
+After=network-online.target ai-agents-orchestrator-root.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aao
+Group=aao
+# Secrets (AAO_TELEGRAM_TOKEN, AAO_PUBLISH_KEY) live in a root-only 0600 file read by systemd as root:
+# the service user (and Codex, which runs with the same uid) cannot read it from disk.
+EnvironmentFile=/etc/ai-agents-orchestrator/env
+Environment=AAO_CONFIG=/etc/ai-agents-orchestrator/config.toml
+Environment=HOME=/var/lib/ai-agents-orchestrator CODEX_HOME=/var/lib/ai-agents-orchestrator/.codex PYTHONUNBUFFERED=1
+ExecStart=/usr/local/bin/aao serve
+Restart=on-failure
+RestartSec=10
+# Graceful restart: SIGTERM stops new work and waits for the running Codex (up to ~290 s).
+TimeoutStopSec=330
+KillMode=mixed
+RuntimeDirectory=ai-agents-orchestrator
+RuntimeDirectoryMode=0750
+UMask=0077
+# Hardening compatible with Codex's bubblewrap sandbox (do not add RestrictNamespaces or SystemCallFilter).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ai-agents-orchestrator
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+MemoryMax=2G
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

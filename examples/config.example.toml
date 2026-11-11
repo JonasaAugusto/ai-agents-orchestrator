@@ -1,0 +1,85 @@
+# ai-agents-orchestrator - example configuration
+# Copy to /etc/ai-agents-orchestrator/config.toml (mode 0644, owner root) or run `aao setup`.
+# Every key can be overridden with an environment variable: AAO_<SECTION>_<KEY>, e.g. AAO_SERVICE_TASKS_PER_HOUR=3.
+#
+# SECRETS DO NOT GO HERE. Put them in /etc/ai-agents-orchestrator/env (mode 0600, owner root), loaded by systemd:
+#   AAO_TELEGRAM_TOKEN=<token from @BotFather>
+#   AAO_PUBLISH_KEY=<64 hex chars, same value as publish.key; `aao setup` generates both>
+# The service user (and therefore Codex, which runs with the same uid) must not be able to read that file.
+
+[service]
+channel = "telegram"           # "telegram" | "whatsapp" (unofficial, see [whatsapp]) | "none" (CLI + Claude Code only)
+user = "aao"                   # unprivileged system user that runs the service and Codex
+timezone = "UTC"               # IANA name; used for display, day counters and the briefing "Updated:" line
+task_timeout = 2400            # seconds per Codex run
+verdict_timeout = 600          # seconds for read-only checks (limit verdict, conversation)
+tasks_per_hour = 6
+handoff_checks_per_day = 6     # cap of real Codex calls caused by Claude's usage-limit hook
+briefing_reminder_min = 45
+commit_author_name = "Orchestrator Agent"
+commit_author_email = "agent@localhost"
+# self_repo = "ai-agents-orchestrator"   # name of this project's own repo in [repos], if the agent may edit it
+
+[paths]
+state_dir = "/var/lib/ai-agents-orchestrator"
+root_state_dir = "/var/lib/ai-agents-orchestrator-root"
+claude_transcripts = "/home/youruser/.claude/projects/-home-youruser-yourproject"
+claude_memory = "/home/youruser/.claude/projects/-home-youruser-yourproject/memory"
+claude_sessions = "/home/youruser/.claude/sessions"    # only for the experimental wake-up
+rules_file = "/etc/ai-agents-orchestrator/BASE_RULES.md"        # start from rules/BASE_RULES.example.md
+division_file = "/etc/ai-agents-orchestrator/DIVISION.md"       # start from rules/DIVISION.example.md
+templates_dir = "/etc/ai-agents-orchestrator/templates"         # AGENTS.<repo>.md files (templates/AGENTS.example.md)
+socket = "/run/ai-agents-orchestrator/cli.sock"
+root_socket = "/run/ai-agents-orchestrator-root/root.sock"
+
+[engines]
+codex_bin = "codex"
+claude_bin = "claude"
+
+[codex]
+network_access = false   # outbound network inside the workspace-write sandbox (pip/npm installs, API docs...)
+# DANGER: full_access = true runs Codex with --sandbox danger-full-access (NO sandbox, full network, whatever the
+# service user can touch). Only enable it on a machine you are ready to lose, and never with the service as root.
+full_access = false
+
+[claude]
+wakeup_enabled = false   # EXPERIMENTAL: wakes the interactive Claude Code session through its local messaging socket
+session_name = ""        # optional: only wake the session with this name
+
+[telegram]
+chat_id = 0              # YOUR numeric Telegram user id (ask @userinfobot). Only this user, in a private chat, is answered.
+max_message_in = 3000
+button_ttl = 600         # seconds a button stays valid
+
+[whatsapp]
+# UNOFFICIAL WhatsApp Web client (optional extra: pip install 'ai-agents-orchestrator[whatsapp]').
+# Not affiliated with WhatsApp/Meta; may violate WhatsApp's Terms; the number can be restricted or banned.
+# Use a secondary number, at your own risk. The project gives no guarantee.
+accept_unofficial_risk = false
+owner_number = ""        # the ONLY number the bot talks to, digits with country code
+max_messages_per_minute = 12
+
+[privacy]
+mask_dev_secrets = true  # also mask API keys/tokens/JWTs in what Codex reads from Claude's transcript and memory
+allowed_email_domains = ["example.com", "localhost", "noreply.github.com"]
+allowed_emails = []
+
+[publish]
+# GitHub "owner/repo" slugs the optional root daemon may push to (agent/* branches, and approved merges into the
+# base branch). Empty = nothing is ever pushed.
+push_allowlist = ["your-org/web-app"]
+manifest = "/etc/ai-agents-orchestrator/publish.json"   # deploy allowlist (see examples/publish.example.json)
+key_file = "/etc/ai-agents-orchestrator/publish.key"
+push_mode = "root"
+
+# Repositories Codex may work on. Alternatively: repos_file = "/etc/ai-agents-orchestrator/repos.json"
+[repos.web-app]
+description = "web front-end"
+github = "your-org/web-app"
+base_branch = "main"
+
+[repos.scripts]
+description = "local-only repository: no GitHub; delivery is the workspace branch + patch"
+source = "/srv/checkouts/scripts"
+base_branch = "main"
+local = true

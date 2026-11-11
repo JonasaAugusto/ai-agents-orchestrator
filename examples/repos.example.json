@@ -1,0 +1,20 @@
+{
+  "_comment": "Optional JSON alternative to [repos.<name>] tables in config.toml (point repos_file at it). Keys starting with _ are ignored.",
+  "web-app": {
+    "description": "web front-end",
+    "github": "your-org/web-app",
+    "base_branch": "main"
+  },
+  "api": {
+    "description": "backend API; the local checkout is used only as an offline fallback",
+    "github": "your-org/api",
+    "source": "/srv/your-checkouts/api",
+    "base_branch": "main"
+  },
+  "scripts": {
+    "description": "local-only repo: no GitHub, delivery is the workspace branch + patch",
+    "source": "/srv/your-checkouts/scripts",
+    "base_branch": "main",
+    "local": true
+  }
+}

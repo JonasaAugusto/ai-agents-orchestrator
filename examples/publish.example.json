@@ -1,0 +1,11 @@
+{
+  "_comment": "Deploy allowlist read by the root daemon on every request (/etc/ai-agents-orchestrator/publish.json, 0600 root). Commands run without a shell, exactly as written, only after an HMAC-signed request from the owner's [Deploy to production] button.",
+  "repos": {
+    "web-app": { "deploy": { "argv": ["/usr/local/sbin/deploy-web-app", "--from-main"], "timeout": 900 } },
+    "scripts": { "deploy": null }
+  },
+  "acoes_extras": {
+    "restart-api": { "argv": ["/usr/bin/systemctl", "restart", "your-api.service"], "timeout": 120 }
+  },
+  "scripts": []
+}

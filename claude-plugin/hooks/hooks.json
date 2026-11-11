@@ -1,0 +1,21 @@
+{
+  "description": "Handoff to Codex when Claude hits its usage limit, and delivery of pending notes from Codex. The `aao` CLI must be on PATH; both commands always exit 0 and never block Claude.",
+  "hooks": {
+    "StopFailure": [
+      {
+        "matcher": "rate_limit",
+        "hooks": [{ "type": "command", "command": "aao claude-limit", "timeout": 10 }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "aao hook-prompt --event UserPromptSubmit", "timeout": 10 }]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{ "type": "command", "command": "aao hook-prompt --event SessionStart", "timeout": 10 }]
+      }
+    ]
+  }
+}

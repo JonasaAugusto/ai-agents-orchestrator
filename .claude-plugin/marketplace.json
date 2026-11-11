@@ -1,0 +1,19 @@
+{
+  "name": "ai-agents-orchestrator",
+  "description": "Claude Code plugins for ai-agents-orchestrator (Claude Code + Codex CLI relay team).",
+  "owner": {
+    "name": "Jonas Augusto"
+  },
+  "plugins": [
+    {
+      "name": "ai-agents-orchestrator",
+      "source": "./claude-plugin",
+      "description": "Skill, hooks and slash commands (/delegate, /orchestrator-status, /review-task, /codex) for working with the orchestrator."
+    },
+    {
+      "name": "aao-codex-pane",
+      "source": "./claude-plugin-pane",
+      "description": "EXPERIMENTAL live side pane (/codex-pane) built on Claude Code's early-access function-hooks API."
+    }
+  ]
+}

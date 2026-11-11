@@ -1,0 +1,26 @@
+# OPTIONAL privileged daemon (mirror of Claude's transcript, guarded pushes, allowlisted deploys, experimental wake-up).
+# Without it the service still runs tasks, but cannot refresh mirrors from root-only sources nor push/publish.
+[Unit]
+Description=ai-agents-orchestrator root daemon (fixed operations, allowlists, HMAC-signed publishing)
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=AAO_CONFIG=/etc/ai-agents-orchestrator/config.toml PYTHONUNBUFFERED=1
+# Run from a root-owned install (the daemon refuses to start if its code is writable by non-root users).
+ExecStart=/usr/local/bin/aao root-daemon
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=ai-agents-orchestrator-root
+RuntimeDirectoryMode=0755
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+LockPersonality=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=multi-user.target

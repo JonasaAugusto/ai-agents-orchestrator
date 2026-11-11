@@ -1,0 +1,11 @@
+{
+  "name": "aao-codex-pane",
+  "version": "1.0.0",
+  "description": "EXPERIMENTAL: /codex-pane opens a live side pane in Claude Code showing what Codex is doing (uses the early-access function-hooks API).",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Jonas Augusto"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/JonasaAugusto/ai-agents-orchestrator"
+}
