@@ -37,7 +37,7 @@ flowchart LR
     SVC -->|prompt + execution snapshot| CX[Codex CLI<br/>sandboxed worker]
     CX -->|agent/ID branch, patch, report| SVC
     SVC -->|note via hook / optional wake-up| CC
-    SVC -->|review, then Publish button<br/>or approved CLI publish| RD[optional root daemon<br/>allowlists + HMAC]
+    SVC -->|review, then Publish button<br/>or approved CLI publish| RD[root daemon<br/>allowlists + HMAC]
     RD -->|push agent/* or merge to main| GH[(GitHub)]
 ```
 
@@ -67,7 +67,7 @@ flowchart LR
 | Handoff | StopFailure hook, Codex verdict as strict JSON, handoff notes for Claude, daily cap of checks |
 | Living briefing | `BRIEFING.md` read first by Codex; stale/future/missing timestamps and diverging SHAs become warnings |
 | Git hygiene | throwaway clones from a bare mirror, `agent/*` branches only, no force/tags/deletes, append-only audit log |
-| Publishing | human approval always; optional root daemon with GitHub allowlist, HMAC-signed single-use merge requests, exact-allowlist deploys |
+| Publishing | human approval always; root daemon with GitHub allowlist, HMAC-signed single-use merge requests, exact-allowlist deploys |
 | Privacy | masking of secrets and personal data in everything the model reads from Claude's transcript and memory |
 | Chat | Telegram (buttons, signed single-use callbacks), unofficial WhatsApp (opt-in), or none |
 | Live view | masked per-task event log, `aao watch`, tmux/terminal opener, experimental Claude Code side pane |
@@ -86,7 +86,7 @@ flowchart LR
 | Engines get a minimal environment | no tokens or keys in Codex's environment; the service is non-dumpable and drops the secrets from its own environment at start |
 | Root never runs repo config it does not own | hardened git (no hooks, fsmonitor, helpers, proxies); mirrors are fetched into root-only clones and copied out |
 | One chat owner | every other chat, user or group is ignored without an answer |
-| Root daemon is optional and narrow | fixed operations, peer-uid check, refuses to start if its code is writable by non-root |
+| Root daemon is narrow | fixed operations, peer-uid check, refuses to start if its code is writable by non-root |
 | Claude session wake-up is off | experimental, uses an undocumented local socket format; it only sends a fixed notice (task id + state), never agent text |
 | Dev secrets are masked too | `privacy.mask_dev_secrets = true` by default |
 
@@ -100,11 +100,12 @@ Linux with systemd, Python 3.11+, git, the [Codex CLI](https://github.com/openai
 **1. Install**
 
 ```bash
+git clone https://github.com/JonasaAugusto/ai-agents-orchestrator && cd ai-agents-orchestrator   # rules/, examples/ and templates/ used below
 sudo useradd --system --home-dir /var/lib/ai-agents-orchestrator --create-home --shell /usr/sbin/nologin aao
 sudo python3 -m venv /opt/ai-agents-orchestrator
-sudo /opt/ai-agents-orchestrator/bin/pip install git+https://github.com/JonasaAugusto/ai-agents-orchestrator   # not on PyPI yet
+sudo /opt/ai-agents-orchestrator/bin/pip install .   # from the clone; not on PyPI yet
 sudo ln -s /opt/ai-agents-orchestrator/bin/aao /usr/local/bin/aao
-# optional, unofficial WhatsApp channel:  sudo /opt/ai-agents-orchestrator/bin/pip install 'ai-agents-orchestrator[whatsapp] @ git+https://github.com/JonasaAugusto/ai-agents-orchestrator'
+# optional, unofficial WhatsApp channel:  sudo /opt/ai-agents-orchestrator/bin/pip install '.[whatsapp]'
 ```
 
 **2. Configure with the wizard**
@@ -330,8 +331,9 @@ of your Claude Code transcript and memory files. Masking is pattern based.
 **Can Codex push to main?** No. The service commits; only the root daemon pushes, only `agent/*` branches of
 allowlisted repos, and merges into the base branch need your signed approval.
 
-**Do I need the root daemon?** No. Without it, tasks still run on local mirrors and you get branches and patches;
-you integrate them yourself.
+**Do I need the root daemon?** Yes, to run tasks. The service refreshes the repository mirrors through it before
+each task and blocks the task if the daemon is unreachable. It is also the only component holding GitHub
+credentials, so it is the one that pushes and publishes.
 
 **Why are some identifiers in Portuguese?** The project started as an internal tool in Brazil. User-facing text is
 English; see the [glossary](#glossary).

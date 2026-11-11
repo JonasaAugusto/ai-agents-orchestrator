@@ -32,7 +32,7 @@ flowchart LR
     SVC -->|prompt + snapshot de execução| CX[Codex CLI<br/>worker no sandbox]
     CX -->|branch agent/ID, patch, relatório| SVC
     SVC -->|recado via hook / acordar opcional| CC
-    SVC -->|revisão e depois botão Publicar<br/>ou publish aprovado no CLI| RD[daemon root opcional<br/>allowlists + HMAC]
+    SVC -->|revisão e depois botão Publicar<br/>ou publish aprovado no CLI| RD[daemon root<br/>allowlists + HMAC]
     RD -->|push agent/* ou merge na main| GH[(GitHub)]
 ```
 
@@ -53,15 +53,16 @@ flowchart LR
 Codex como usuário sem privilégio (`aao`), `workspace-write` **sem rede**; `danger-full-access` só com
 `codex.full_access = true` (opt-in explícito, com aviso); publicar sempre exige humano; nada vai ao GitHub fora de
 `publish.push_allowlist` (vazio por padrão); token e chave HMAC num arquivo 0600 do root; um único dono no chat;
-daemon root opcional e restrito; acordar a sessão do Claude desligado (experimental); segredos de desenvolvimento
+daemon root restrito (obrigatório para rodar tarefas: ele atualiza os espelhos dos repositórios); acordar a sessão do Claude desligado (experimental); segredos de desenvolvimento
 mascarados por padrão. Veja [SECURITY.md](SECURITY.md).
 
 ## Início rápido
 
 ```bash
+git clone https://github.com/JonasaAugusto/ai-agents-orchestrator && cd ai-agents-orchestrator   # rules/, examples/ e templates/ usados abaixo
 sudo useradd --system --home-dir /var/lib/ai-agents-orchestrator --create-home --shell /usr/sbin/nologin aao
 sudo python3 -m venv /opt/ai-agents-orchestrator
-sudo /opt/ai-agents-orchestrator/bin/pip install git+https://github.com/JonasaAugusto/ai-agents-orchestrator   # ainda não está no PyPI
+sudo /opt/ai-agents-orchestrator/bin/pip install .   # do clone; ainda não está no PyPI
 sudo ln -s /opt/ai-agents-orchestrator/bin/aao /usr/local/bin/aao
 sudo aao setup      # assistente: canal de chat (Telegram / WhatsApp / nenhum), repositórios, segredos em arquivo 0600
 ```

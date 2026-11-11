@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Documentation
+
+- Quickstart now clones the repository first, so `rules/`, `examples/` and `templates/` exist for the copy steps;
+  installs from the clone (`pip install .`, `pip install '.[whatsapp]'`).
+- The root daemon is documented as required to run tasks (the service refreshes repository mirrors through it and
+  blocks a task when it is unreachable); the FAQ claimed it was optional.
+
 ## [1.0.1] - 2026-11-11
 
 ### Security

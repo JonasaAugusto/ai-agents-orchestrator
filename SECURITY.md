@@ -19,7 +19,7 @@ Only the latest release receives security fixes.
   sandbox, without network, in throwaway clones. `codex.full_access = true` removes that boundary.
 - The service user cannot read the bot token or the publish HMAC key from disk (root-only `EnvironmentFile`); Codex
   shares the service uid, so it can read what that user can read, including its own Codex login.
-- The optional root daemon accepts a fixed set of operations from the service uid only, pushes only `agent/*` branches
+- The root daemon accepts a fixed set of operations from the service uid only, pushes only `agent/*` branches
   to allowlisted GitHub repositories, never force-pushes, tags or deletes, and runs deploy commands only from an exact
   allowlist with an HMAC-signed, expiring, single-use request.
 - Masking of secrets and personal data is pattern based: a secret in a novel format can slip through.
