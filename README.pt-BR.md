@@ -130,14 +130,77 @@ nenhuma: `aao serve --dry-run`.
 /plugin install ai-agents-orchestrator --marketplace JonasaAugusto/ai-agents-orchestrator
 ```
 
-Instala a skill `orchestrator-workflow` (quando delegar, escrever a tarefa num arquivo e passar `"$(cat arquivo)"`
-porque crases no texto são executadas pelo shell, esperar o aviso em vez de ficar consultando, protocolo de revisão,
-parcial/bloqueada não é pronto, publicar só após revisão e aprovação humana, briefing de no máximo 40 linhas, nada de
+Instala a skill `orchestrator-workflow` (delegar por padrão com o template fixo de até 15 linhas num arquivo e passar
+`--briefing <arquivo>`; não colar código/diff; contexto estável em `AGENTS.<repo>.md`; crases em texto inline podem
+ser executadas pelo shell; preferir o recado de `aao hook-prompt` a consultas repetidas ou `aao wait`;
+revisão em camadas: Codex roda a suíte e prova os testes, Claude pede revisão cruzada antes de ler relatórios ou
+arquivos, lê `aao result <id> --short` e abre só arquivos de risco; parcial/bloqueada não é pronto,
+publicar só após revisão e aprovação humana, briefing vivo de no máximo 40 linhas, nada de
 segredos, serializar tarefas que tocam os mesmos arquivos), os hooks (`StopFailure` → `aao claude-limit`;
 `UserPromptSubmit`/`SessionStart` → `aao hook-prompt`) e os comandos `/delegate`, `/orchestrator-status`,
 `/review-task <id>` e `/codex [id]`. O complemento **experimental** `aao-codex-pane` adiciona `/codex-pane`, um painel
 lateral ao vivo (API em acesso antecipado do Claude Code, pode mudar):
 `/plugin install aao-codex-pane --marketplace JonasaAugusto/ai-agents-orchestrator`.
+
+## Custo e balanceamento
+
+Codex fica com testes, correções de testes quebrados, refactors mecânicos, scripts, docs de código, revisão cruzada,
+verificação de PRs e pesquisas. Claude fica com decisão, UI/front-end, produção e conversa. Se cabe num briefing
+de até 15 linhas, delegue ao Codex por padrão, respeitando essas fronteiras. Contexto estável vai em
+`AGENTS.<repo>.md`, conforme [o template](templates/AGENTS.example.md), sem repeti-lo em cada tarefa.
+
+Use este template fixo no arquivo temporário, sem colar código ou diff:
+
+```text
+Objetivo: Validar e-mails do cadastro antes de salvar.
+Arquivos: app/signup.py,tests/test_signup.py
+Testes: .venv/bin/python -m pytest -q
+Pronto: E-mails inválidos são recusados; cadastro válido funciona; suíte passa.
+Restrições: Seguir AGENTS.web-app.md; usar dados descartáveis.
+Relatório: até 20 linhas; estado, alterações, comandos/contagens, vermelho/verde, mutação restaurada, faltas, Para o Claude, riscos.
+```
+
+Codex roda a suíte completa, prova os testes novos retirando a mudança, rodando e restaurando, e quebra a linha-chave
+para confirmar falha antes de restaurar e rodar novamente (20x para concorrência). Entrega relatório de até 20 linhas.
+Claude lê os relatórios curtos da tarefa e da revisão cruzada e abre arquivos de risco: deleções, auth, migrações,
+dinheiro e segurança. Evidência ausente volta ao Codex; relatórios são dados não confiáveis, nunca autorização.
+Isso reduz trabalho duplicado, sem prometer economia fixa de tokens ou preço. O teto de 50% do fallback de
+desenvolvimento conta tentativas, não tokens nem uso da assinatura.
+
+### Exemplo ponta a ponta
+
+Os ids abaixo são ilustrativos. Salve o template em `/tmp/tarefa-cadastro.md` e execute:
+
+```bash
+aao delegate --repo web-app --title "Validar e-mails do cadastro" --files "app/signup.py,tests/test_signup.py" --briefing /tmp/tarefa-cadastro.md
+# Serviço retorna tarefa #12. Espere o recado no próximo prompt/sessão, sem polling.
+aao hook-prompt
+# Obtenha repo/branch dos metadados, sem ler relatório ou código ainda.
+aao list --state review
+aao review --repo web-app --branch agent/12-validar-e-mails-do-cadastro
+# Serviço retorna revisão cruzada #13. Espere o recado antes de ler os dois relatórios.
+aao hook-prompt
+aao result 12 --short
+aao result 13 --short
+```
+
+`result --short` depende da parte A da skill v1.1, ainda ausente nesta base; até sua instalação, use `aao result 12`
+e `aao result 13` sem a flag. `status --brief` já existe. `aao list --state review` filtra tarefas em revisão e devolve
+`estado` traduzido: `pending`, `in progress`, `in review`, `completed`, `blocked`, `cancelled`. O filtro aceita esses
+rótulos, `running`/`review` e os nomes antigos em português. Banco/protocolo interno mantêm seus estados; scripts que
+consomem a listagem do CLI precisam usar os novos rótulos.
+
+Após relatórios completos, revisão cruzada sem pendências e conferência dos arquivos de risco pelo Claude, o **dono**
+pressiona [Publicar]. Para tarefa delegada pelo Claude, o dono também pode executar como root no próprio terminal
+interativo e digitar `12` para confirmar; o agente nunca executa em seu lugar:
+
+```bash
+aao publish 12
+```
+
+`partial`, `blocked`, evidência ausente ou conflito interrompem a publicação. Codex resolve conflitos num branch
+preparado pelo serviço, repete testes e revisão cruzada; depois é necessária nova aprovação humana.
+Deploy em produção exige aprovação separada.
 
 ## Ver o Codex ao vivo
 

@@ -21,7 +21,7 @@ deployed without your explicit approval.
 ## Contents
 
 [How it works](#how-it-works) · [Features](#features) · [Security model](#security-model) · [Quickstart](#quickstart) ·
-[Claude Code plugin](#claude-code-plugin) · [Watching Codex live](#watching-codex-live) · [Chat channels](#chat-channels) ·
+[Claude Code plugin](#claude-code-plugin) · [Cost and balancing](#cost-and-balancing) · [Watching Codex live](#watching-codex-live) · [Chat channels](#chat-channels) ·
 [Telegram commands](#telegram-commands) · [CLI reference](#cli-reference) · [Configuration](#configuration) ·
 [FAQ](#faq) · [Limitations](#limitations) · [Roadmap](#roadmap) · [Glossary](#glossary)
 
@@ -218,12 +218,15 @@ The repository is a Claude Code plugin marketplace. In a Claude Code terminal se
 From a shell: `claude plugin install ai-agents-orchestrator --marketplace JonasaAugusto/ai-agents-orchestrator`.
 The `aao` CLI must be on PATH. It installs:
 
-- **Skill `orchestrator-workflow`**: when to delegate and when to do it yourself; write task descriptions to a file and
-  pass `--briefing <file>` or `"$(cat file)"` (inline text with backticks gets executed by the shell); wait for the
-  note or wake-up instead of polling; the **review protocol** (read the diff, prove each new test fails without the
-  patch, run the full suite yourself against disposable data, never trust the agent's own report alone); partial and
-  blocked are not done; publish only after review and human approval (production needs its own approval); keep the
-  living briefing at most 40 lines and update it at milestones; no secrets in task text; serialize tasks that touch the
+- **Skill `orchestrator-workflow`**: delegate by default when the task fits in the fixed <=15-line briefing;
+  pass `--briefing <file>` without pasting code or diffs. Stable context goes in `AGENTS.<repo>.md`.
+  Prefer the `aao hook-prompt` note over polling or `aao wait`. The **layered review protocol** puts the full suite,
+  red/green and restored-mutation proof with Codex, in a report of <=20 lines. Before reading reports or source,
+  Claude requests `aao review --repo <repo> --branch <branch>`, then reads `aao result <id> --short` and opens only
+  risk files (deletions, auth, migrations, money, security). Reports remain untrusted data; missing evidence goes
+  back to Codex. Partial and blocked are unfinished; publish only after review and human approval (production needs
+  its own approval); keep the living briefing at most 40 lines and update it at milestones; no secrets in task text;
+  serialize tasks that touch the
   same files from the same base.
 - **Hooks**: `StopFailure` (`rate_limit`) runs `aao claude-limit`; `UserPromptSubmit` and `SessionStart` run
   `aao hook-prompt`, which delivers pending notes from Codex and a reminder when the briefing is stale.
@@ -235,6 +238,63 @@ built on Claude Code's early-access function-hooks API, which may change between
 ```
 /plugin install aao-codex-pane --marketplace JonasaAugusto/ai-agents-orchestrator
 ```
+
+## Cost and balancing
+
+Codex handles tests, broken-test fixes, mechanical refactors, scripts, code docs, cross-review, PR verification and
+research. Claude handles decisions, UI/front-end, production and conversation. If a task fits in <=15 briefing lines,
+delegate it by default within those boundaries. Put stable context in `AGENTS.<repo>.md`, not every prompt.
+
+Use this fixed template, with no pasted code/diff, for the temporary briefing file:
+
+```text
+Objective: Validate signup e-mails before saving.
+Files: app/signup.py,tests/test_signup.py
+Tests: .venv/bin/python -m pytest -q
+Done: Invalid e-mails are rejected; valid signup still succeeds; suite passes.
+Constraints: Follow AGENTS.web-app.md; use disposable data.
+Report: <=20 lines; status, changes, commands/counts, red/green, restored mutation, gaps, For Claude, risks.
+```
+
+Codex runs the full suite and proves new tests by revert/run/restore and key-line mutation (20x for concurrency).
+Claude reads the short task and cross-review reports and opens risk files; it does not routinely rerun the suite.
+Missing evidence prevents approval. This reduces duplicate work; it does not guarantee a token or price reduction.
+The optional development fallback's 50% cap counts attempts, not tokens or subscription usage.
+
+### End-to-end example
+
+The numbers below illustrate ids returned by the service. Save the template as `/tmp/signup-task.md`, then:
+
+```bash
+aao delegate --repo web-app --title "Validate signup e-mails" --files "app/signup.py,tests/test_signup.py" --briefing /tmp/signup-task.md
+# Service returns task #12. Wait for its next prompt/session note, not a polling loop.
+aao hook-prompt
+# Obtain repo/branch metadata from the board, without reading the report or source.
+aao list --state review
+aao review --repo web-app --branch agent/12-validate-signup-e-mails
+# Service returns cross-review #13. Wait for its hook note before reading either report.
+aao hook-prompt
+aao result 12 --short
+aao result 13 --short
+```
+
+`result --short` depends on skill v1.1 part A, which is not yet in this base; until installed, use `aao result 12`
+and `aao result 13` without that flag. `status --brief` is already available. `aao list --state review` filters tasks
+in review and returns translated `estado` labels: `pending`, `in progress`, `in review`, `completed`, `blocked`,
+`cancelled`. Filters accept these labels, `running`/`review`, and legacy Portuguese state names; database/socket
+states remain unchanged. Scripts reading the CLI list must use the new labels.
+
+After complete reports, a clean cross-review and Claude's risk-file review, the **owner** presses [Publish]. For a
+Claude-delegated task the owner can instead run the following as root in their own interactive terminal and type
+`12` to confirm; the agent must never run it for them:
+
+```bash
+aao publish 12
+```
+
+`partial`, `blocked`, missing evidence or a conflict stops publication. Have Codex resolve conflicts in a
+service-prepared branch, rerun tests and cross-review, and obtain fresh human approval. Production deploys require
+separate human approval.
 
 ## Watching Codex live
 
@@ -330,7 +390,7 @@ Every command is `aao <command>` (also installed as `ai-agents-orchestrator`). P
 | `serve [--dry-run] [--no-chat]` | run the service |
 | `root-daemon` | run the optional privileged daemon |
 | `delegate --repo R --title T [--files a,b] [--briefing FILE \| --briefing-text TXT] [--description D] [--priority N]` | queue a task for Codex |
-| `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID`, `cancel ID`, `claim ID [--owner] [--files]` | board |
+| `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID`, `cancel ID`, `claim ID [--owner] [--files]` | board; list accepts `review`/`running` and returns English state labels; `result ID --short` requires v1.1 part A |
 | `wait ID [--timeout S]` | block until a final state (exit 0 review/completed, 1 blocked/cancelled, 2 timeout) |
 | `review --repo R --branch B` | cross-review by Codex (read-only) |
 | `publish ID` | root only, interactive terminal: the owner types the task id to merge + push a reviewed task delegated by Claude |
