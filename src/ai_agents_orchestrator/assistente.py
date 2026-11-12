@@ -45,7 +45,8 @@ def gerar_toml(r: dict) -> str:
     for nome, spec in r["repos"].items():
         linhas.append(f"[repos.{nome}]")
         for k, v in spec.items():
-            linhas.append(f"{k} = {_toml_str(v)}")
+            valor = str(v).lower() if isinstance(v, bool) else _toml_str(v)
+            linhas.append(f"{k} = {valor}")
         linhas.append("")
     return "\n".join(linhas)
 
@@ -176,6 +177,55 @@ class Assistente:
             cli.connect()
         except Exception as e:  # pragma: no cover
             self.saida(f"Pairing not done ({type(e).__name__}). Install the extra and run `{CLI} setup` again.")
+
+
+def nao_interativo(destino: Path, fonte: Path | None = None) -> int:
+    """Write a local evaluation config only; never infer a production path or create credentials."""
+    import pwd
+
+    # Check before resolve(), otherwise an existing symlink would be silently followed.
+    if destino.is_symlink() or (destino.exists() and (not destino.is_dir() or any(destino.iterdir()))):
+        print("setup refused: --output-dir must be a new or empty directory, not a symlink")
+        return 1
+    destino = destino.resolve()
+    fonte = fonte.resolve() if fonte is not None else None
+    if fonte is not None and not (fonte.is_dir() and (fonte / ".git").exists()):
+        print("setup refused: --repo-source must be a local Git checkout")
+        return 1
+    destino.mkdir(parents=True, exist_ok=True, mode=0o700)
+    usuario = pwd.getpwuid(os.geteuid()).pw_name
+    texto = gerar_toml({"channel": "none", "user": usuario, "timezone": "UTC",
+                        "state_dir": str(destino / "state"), "claude_transcripts": str(destino / "transcripts"),
+                        "allowlist": [], "repos": {"demo": {"source": str(fonte), "base_branch": "main", "local": True}}
+                        if fonte else {}})
+    caminhos = {"root_state_dir": "root-state", "claude_memory": "memory", "claude_sessions": "sessions",
+                "rules_file": "BASE_RULES.md", "division_file": "DIVISION.md", "templates_dir": "templates",
+                "socket": "cli.sock", "root_socket": "root.sock"}
+    extras = "".join(f"{key} = {_toml_str(str(destino / value))}\n" for key, value in caminhos.items())
+    texto = texto.replace("[paths]\n", "[paths]\n" + extras)
+    texto = texto.replace("[publish]\n", "[publish]\n" +
+                          f"manifest = {_toml_str(str(destino / 'publish.json'))}\n" +
+                          f"key_file = {_toml_str(str(destino / 'publish.key'))}\n")
+    # This evaluation mode may run in CI as root. Never truncate or replace a
+    # file inserted after the empty-directory check, and anchor writes to the fd.
+    try:
+        directory = os.open(destino, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            st = os.fstat(directory)
+            if st.st_uid != os.geteuid() or st.st_mode & 0o022:
+                print("setup refused: --output-dir must be owned by the current user and not writable by group/others")
+                return 1
+            fd = os.open("config.toml", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(texto)
+        finally:
+            os.close(directory)
+    except OSError:
+        print("setup refused: could not exclusively create config.toml; existing files were preserved")
+        return 1
+    print("Created isolated config.toml (0600); channel=none, sandbox=workspace-write, publishing disabled.")
+    print("No login, user, secret, service or plugin installation was performed. Run aao doctor with AAO_CONFIG.")
+    return 0
 
 
 def main() -> int:  # pragma: no cover - interactive

@@ -10,22 +10,93 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install the package
-        run: python -m pip install .
-      - name: Run the test suite
-        run: python -W ignore -m unittest discover -s tests -t . -v
-      - name: CLI smoke test
+          python-version: ${{ matrix.python }}
+      # The daemon's code-ownership tests require a root-owned installed package.
+      - run: sudo env "PATH=$PATH" "$(command -v python)" -m pip install .
+      # Existing privileged filesystem tests must run, not be skipped for lack of uid 0.
+      # /tmp has a root-owned sticky parent on both runners; runner-private TMPDIR does not.
+      - name: Test suite (disposable resources only)
+        run: sudo env TMPDIR=/tmp "$(command -v python)" -W ignore -m unittest discover -s tests -t . -v
+      - name: CLI and offline example
         run: |
           aao --version
           aao --help
           aao check-rules --file rules/BASE_RULES.example.md
+          python examples/offline_relay.py
+
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install '.[dev]'
+      - run: ruff check .
+      - run: mypy
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.24.2"
+          GITLEAKS_ENABLE_COMMENTS: "false"
+      - name: Full history and current tree (also beyond the event diff)
+        run: |
+          gitleaks git --log-opts=--all --redact --no-banner
+          gitleaks dir --redact --no-banner .
+
+  clean-install:
+    name: Empty Linux container / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    container: python:${{ matrix.python }}-slim
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install only the Git fixture prerequisite
+        run: apt-get update && apt-get install -y --no-install-recommends git
+      - name: Fresh venv, pip install ., setup, doctor, fake task and plugin
+        run: sh scripts/clean-install-test.sh --empty
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install '.[dev]'
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - name: Install and exercise both artifacts
+        run: |
+          sh scripts/clean-install-test.sh --distribution dist/*.whl
+          sh scripts/clean-install-test.sh --distribution dist/*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-distributions
+          path: dist/*

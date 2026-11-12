@@ -1,0 +1,13 @@
+title = "Default rules with one exact synthetic redaction fixture"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "Public fake value used to test masking, including its original historical commit"
+condition = "AND"
+paths = ['''(^|/)tests/test_historico\.py$''']
+regexTarget = "secret"
+regexes = ['''^eyJhbGciOiJIUzI1\.eyJzdWIiOiIxMjM0\.abcdEFGH12$''']

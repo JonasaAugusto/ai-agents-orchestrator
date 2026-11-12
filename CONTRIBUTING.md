@@ -9,17 +9,50 @@ mind first.
 git clone https://github.com/JonasaAugusto/ai-agents-orchestrator
 cd ai-agents-orchestrator
 python -m venv .venv && . .venv/bin/activate
-pip install -e .
-python -W ignore -m unittest discover -s tests -t .
+pip install -e '.[dev]'
+python -m unittest tests.test_clean_install tests.test_doctor_setup tests.test_plugin
+ruff check .
+mypy
+sh scripts/clean-install-test.sh --empty
+python -m build
+python -m twine check --strict dist/*
+sh scripts/clean-install-test.sh --distribution dist/*.whl
+sh scripts/clean-install-test.sh --distribution dist/*.tar.gz
 ```
 
 The project is Python only and has no runtime dependencies (the WhatsApp extra is optional). The test suite needs
 `git` on PATH and never calls OpenAI, Anthropic, Telegram or WhatsApp: engines, chat channels and the root daemon are
 replaced by doubles in `ai_agents_orchestrator.testing` and in the tests.
 
+The clean-install check builds in a source copy and creates a fresh venv/HOME, then exercises the installed package
+and static plugin contract. Only fetching build tools needs network. The fake task never pushes or deploys.
+For a shorter runnable example use `python examples/offline_relay.py`; see [examples](examples/README.md).
+`aao doctor` intentionally exits 1 without required agents and daemon sockets; the clean check asserts the exact
+missing prerequisites. It does not claim a working live Claude Code/Codex installation.
+
+CI runs Linux/macOS × Python 3.11–3.14, correctness lint, limited type checks, full-history gitleaks, empty Linux
+container installs, and wheel/sdist builds and installs. Privileged tests use root **only on disposable CI runners**
+with `TMPDIR=/tmp`. Never run the suite with production configuration, credentials or data. For local root runs,
+put the test venv/package somewhere the unprivileged subprocesses can traverse; a private checkout can cause
+permission failures. The existing Linux-only `/proc` test is not applicable on macOS; do not add skips to hide bugs.
+The full-suite command is `python -W ignore -m unittest discover -s tests -t .`; run it as in CI on a disposable
+runner. It includes real UID/ownership tests that cannot run as an ordinary local user. The setup commands above
+run the focused adoption tests without elevated privileges; do not grant root on your working machine just to
+make the full suite pass.
+
+Ruff checks `E9`/`F`; existing unused-import exemptions are listed per legacy file in `pyproject.toml`, not applied
+to new files. Mypy checks setup, the installer test and the offline example, following other modules silently;
+it is not a claim that the entire application is typed. Extend the scope as modules are annotated. Developer tool
+versions are pinned in the `dev` extra. Runtime installation still has no mandatory dependencies.
+`.gitleaks.toml` inherits the default secret rules and exempts only one exact synthetic masking-test value in its
+specific fixture path (including history). It does not exclude test directories or commits from scanning.
+
 ## Rules for changes
 
 - Every behavior change comes with tests; a new test must fail without the change and pass with it.
+- Record the failing baseline and passing patch commands/results in the PR. Break the key line deliberately,
+  confirm the regression test fails, and restore it. Repeat concurrency tests 20 times using events/barriers or
+  injected clocks, not sleeps. Keep artifacts and scratch notes outside the repository.
 - No test may depend on sleeping or wall-clock time: inject a clock (`relogio=`), use events or fakes.
 - Keep the safe defaults. Anything that widens what an agent can do (sandbox, network, pushes, deploys, channels)
   must be an explicit, documented opt-in and covered by `aao doctor`.
@@ -30,5 +63,6 @@ replaced by doubles in `ai_agents_orchestrator.testing` and in the tests.
 
 ## Commit and PR
 
-Small, focused pull requests with a clear description and the test command you ran. CI runs the suite on Python 3.11
-and 3.12.
+Small, focused pull requests with a clear description and the test commands you ran. Use the PR template and read
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
+Do not publish releases or tags from a contribution branch; maintainers review and the owner approves publication.
