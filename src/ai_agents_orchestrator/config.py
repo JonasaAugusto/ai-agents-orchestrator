@@ -133,7 +133,7 @@ class Config:
     codex_tokens_7d: int = 0
     balance_ratio_low: float = 0.7
     balance_ratio_high: float = 1.4
-    balance_alert_high: float = 85.0
+    balance_alert_high: float = 70.0
     balance_alert_low: float = 50.0
     balance_tasks_factor: float = 0.5
     balance_refresh_seconds: int = 300

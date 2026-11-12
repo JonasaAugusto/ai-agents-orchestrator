@@ -24,6 +24,19 @@ class Padroes(unittest.TestCase):
         self.assertEqual(c.channel, "none")
         self.assertEqual(c.repos, {})
 
+    def test_politica_de_gasto_padroes(self):
+        c = Config()
+        self.assertEqual(c.max_codex_simultaneos, 1)
+        self.assertEqual(c.balance_alert_high, 70.0)
+        self.assertEqual(config.carregar(env={}).max_codex_simultaneos, 1)
+
+    def test_skill_e_readmes_documentam_politica_de_gasto(self):
+        skill = (RAIZ / "claude-plugin/skills/orchestrator-workflow/SKILL.md").read_text()
+        self.assertIn("Spend policy", skill)
+        self.assertTrue((RAIZ / "claude-plugin/skills/orchestrator-workflow/spend-policy.md").exists())
+        self.assertIn("## Spend policy", (RAIZ / "README.md").read_text())
+        self.assertIn("## Política de gasto", (RAIZ / "README.pt-BR.md").read_text())
+
     def test_comando_do_codex_por_padrao_tem_sandbox_e_sem_rede(self):
         r = engines.CodexRunner(Path("/tmp"))
         cmd = r.comando("/w", "workspace-write", "/o")

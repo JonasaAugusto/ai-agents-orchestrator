@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows
 - `aao delegate --model`, `--effort` (this task only) and `--wait` (waits and prints the short result; exit 0 on review/completed).
 
 ### Changed
+- Spend policy (skill `spend-policy.md`, SKILL.md and both READMEs): Codex `medium` by default, one Codex task at a time, new short-briefing subagents instead of forking, at most 2 parallel on non-overlapping files; `balance.alert_high_pct` now defaults to 70 (was 85).
 - README: the lite Quickstart and the one-command install (`pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator`) are on the first screen; the comparison and the support policy moved to `docs/comparison.md` and `docs/support-policy.md` (with pt-BR copies).
 - The "Windows is not tested" text now matches the OS support table, the CI and 1.2.1; Python classifier is Beta.
 - `docs/first-10-minutes.md` recaptured for 1.2.1 with the lite path and a PowerShell note; broken `#quickstart` anchors fixed; `aao delegate` example now creates a real task; config example mode comment aligned with `aao setup`.

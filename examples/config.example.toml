@@ -70,7 +70,7 @@ ratio_high = 1.4
 # avoid diffs; auto engine uses Codex. Explicit engines and hard usage limits retain their semantics.
 # Below ratio_low Claude may review directly, and the task cap becomes floor(tasks_per_hour * factor), min 1.
 low_ratio_tasks_factor = 0.5
-alert_high_pct = 85.0          # channel alert strictly above this, with the other engine strictly below:
+alert_high_pct = 70.0          # channel alert strictly above this, with the other engine strictly below:
 alert_other_below_pct = 50.0
 refresh_seconds = 300         # timer refresh; cached local data only in hooks/status/routing
 max_age_seconds = 900         # stale Codex account data falls back to configured token quotas

@@ -256,7 +256,7 @@ usage in either window takes precedence over a low ratio in the other. Explicit 
 approval, file locks and hard usage limits remain in force; economic mode can make headless fallback wait for Codex.
 Positive Claude usage with zero Codex usage is above target; both zero or missing data is unknown and leaves routing
 and the hourly cap unchanged. `balance.enabled = false` disables guidance, automatic balancing and alerts, while
-keeping accounting. A channel alert fires when one engine is above 85% and the other below 50%, once per imbalance
+keeping accounting. A channel alert fires when one engine is above 70% and the other below 50%, once per imbalance
 episode/window; thresholds are configurable. Without a channel there is no remote alert delivery.
 
 `service.tasks_per_hour` and `service.handoff_checks_per_day` are independent cost levers: the first caps task
@@ -496,6 +496,21 @@ built on Claude Code's early-access function-hooks API, which may change between
 ```
 /plugin install aao-codex-pane --marketplace JonasaAugusto/ai-agents-orchestrator
 ```
+
+<!-- spend-policy:start -->
+## Spend policy
+
+The limits of Claude and Codex should run out because work shipped, not because of waste.
+
+- Codex: default effort `medium`; `high`/`xhigh` only with an explicit reason (security, a hard bug), per task with
+  `aao delegate --effort`. One Codex task at a time (`service.max_concurrent_codex = 1`) unless you opt into parallel.
+  Focused tests while working, the full suite once at the end.
+- Claude: prefer new subagents with a short briefing (objective, files, done criteria) over forking a large
+  conversation; every fork rereads all context and costs more per task.
+- Parallel work is fine, at most 2 at once, on files that do not overlap, one worktree per agent, a single agent merges.
+- Measure with `aao claude-usage` / `aao status --brief`; the channel alert fires at 70% (`balance.alert_high_pct`)
+  so the other engine takes over before the first runs out. Details: `claude-plugin/skills/orchestrator-workflow/spend-policy.md`.
+<!-- spend-policy:end -->
 
 ## Cost and balancing
 

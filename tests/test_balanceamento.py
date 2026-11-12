@@ -208,8 +208,8 @@ class Balanceamento(Base):
         self.assertEqual(len(self.tr.textos()), 2)
         self.assertIn('Codex 90%', self.tr.textos()[-1])
 
-    def test_alerta_limites_estritos_85_e_50(self):
-        self.uso(850, 100)
+    def test_alerta_limites_estritos_70_e_50(self):
+        self.uso(700, 100)
         self.svc.alertar_balanceamento()
         self.assertEqual(self.tr.textos(), [])
         self.estado.registrar_execucao('turno', 'claude', 0, True, agora=self.t[0], tokens_in=50)

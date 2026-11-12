@@ -44,6 +44,14 @@ Report: <=20 lines; status, changes, test commands/counts, red/green, restored m
 aao delegate --repo web-app --title "Validate signup e-mails" --files "app/signup.py,tests/test_signup.py" --briefing "task.md"
 ```
 
+## Spend policy
+
+Details in `spend-policy.md`. Codex effort stays `medium`; `high`/`xhigh` only with a stated reason, per task via
+`aao delegate --effort`. One Codex task at a time; focused tests during, full suite once at the end. Claude prefers
+new subagents with a short briefing (objective, files, done criteria) over forking this conversation, because each
+fork rereads all context. Parallel work: at most 2, on non-overlapping files, one worktree each, one agent merges.
+At about 70% of one weekly quota, check `aao claude-usage` and hand work to the other engine before it runs out.
+
 ## Wait, do not poll
 
 When the task ends, the service tells you: through the hook note on your next prompt, or, if the operator enabled the

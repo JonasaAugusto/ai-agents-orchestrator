@@ -249,7 +249,7 @@ fator `low_ratio_tasks_factor` (padrão 0,5, arredonda para baixo, mínimo um se
 Razão alta em uma janela prevalece sobre baixa na outra. Motor explícito, travas, limites reais e aprovação humana
 continuam valendo; no modo econômico o fallback headless pode esperar o reset do Codex. Claude positivo/Codex zero
 fica acima da faixa; ambos zero ou dado ausente não muda roteamento/teto. `balance.enabled = false` desliga
-orientação, balanceamento e alertas, mantendo os contadores. O canal alerta quando um lado passa de 85% e o outro
+orientação, balanceamento e alertas, mantendo os contadores. O canal alerta quando um lado passa de 70% e o outro
 está abaixo de 50%, uma vez por episódio/janela; limiares configuráveis. Sem canal, não há entrega remota do alerta.
 
 `service.tasks_per_hour` limita tentativas de tarefa; `service.handoff_checks_per_day` limita verificações reais de
@@ -392,6 +392,22 @@ segredos, serializar tarefas que tocam os mesmos arquivos), os hooks (`StopFailu
 `/review-task <id>` e `/codex [id]`. O complemento **experimental** `aao-codex-pane` adiciona `/codex-pane`, um painel
 lateral ao vivo (API em acesso antecipado do Claude Code, pode mudar):
 `/plugin install aao-codex-pane --marketplace JonasaAugusto/ai-agents-orchestrator`.
+
+<!-- spend-policy:start -->
+## Política de gasto
+
+O limite do Claude e do Codex deve acabar porque o trabalho saiu, não por desperdício.
+
+- Codex: esforço padrão `medium`; `high`/`xhigh` só com motivo explícito (segurança, bug difícil), por tarefa com
+  `aao delegate --effort`. Uma tarefa do Codex por vez (`service.max_concurrent_codex = 1`), salvo se você optar por
+  paralelo. Testes focados durante o trabalho, suíte completa uma vez no fim.
+- Claude: prefira subagentes novos com briefing curto (objetivo, arquivos, critérios de pronto) a fazer fork de uma
+  conversa grande; cada fork relê todo o contexto e custa mais por tarefa.
+- Paralelismo é permitido, no máximo 2 ao mesmo tempo, em arquivos que não se tocam, um worktree por agente e um único
+  agente faz a junção.
+- Meça com `aao claude-usage` / `aao status --brief`; o alerta do canal dispara em 70% (`balance.alert_high_pct`)
+  para o outro lado assumir antes de o primeiro acabar. Detalhes: `claude-plugin/skills/orchestrator-workflow/spend-policy.md`.
+<!-- spend-policy:end -->
 
 ## Custo e balanceamento
 
