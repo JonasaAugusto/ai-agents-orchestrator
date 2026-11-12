@@ -27,19 +27,19 @@ AVISO_SEM_CANAL = ("Without a chat channel you cannot send prompts to Codex from
                    "(WhatsApp is available as an unofficial, at-your-own-risk alternative).")
 
 
-def chamar(cfg, req: dict, timeout: float = 30) -> dict:
+def chamar(cfg, req: dict, timeout: float | None = 30) -> dict:
     try:
-        c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        c.settimeout(timeout)
-        c.connect(str(cfg.socket_path))
-        c.sendall((json.dumps(req) + "\n").encode())
-        dados = b""
-        while not dados.endswith(b"\n"):
-            p = c.recv(65536)
-            if not p:
-                break
-            dados += p
-        c.close()
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+            c.settimeout(30 if timeout is None else timeout)
+            c.connect(str(cfg.socket_path))
+            c.settimeout(timeout)
+            c.sendall((json.dumps(req) + "\n").encode())
+            dados = b""
+            while not dados.endswith(b"\n"):
+                p = c.recv(65536)
+                if not p:
+                    break
+                dados += p
         return json.loads(dados.decode())
     except (OSError, ValueError):
         return {"ok": False, "erro": f"service unavailable (systemctl status {config.NOME})"}
@@ -107,7 +107,8 @@ def _hook_prompt(cfg, evento: str) -> int:
     if r.get("ok") and r.get("texto"):
         partes.append(r["texto"])
         # in fallback Claude "takes the baton" (tells the owner); in parallel work it only marks the note as read
-        chamar(cfg, {"cmd": "claude_assumiu" if r.get("em_fallback") else "recado_lido"}, timeout=5)
+        if r.get("em_fallback"):
+            chamar(cfg, {"cmd": "claude_assumiu", "marcar_notas": False}, timeout=5)
     try:
         b = chamar(cfg, {"cmd": "briefing_status"}, timeout=3)
         idade = b.get("idade_min")
@@ -297,6 +298,7 @@ def parser() -> argparse.ArgumentParser:
     _sub(sp, "setup", help="interactive wizard: writes the config and the secrets env file")
     d = _sub(sp, "doctor", help="check the installation and print fix instructions")
     d.add_argument("--json", action="store_true", help="machine-readable output")
+    d.add_argument("--fix", action="store_true", help="create missing state directories and example rules; never restart services")
     vr = _sub(sp, "check-rules", "verificar-regras", help="lint the base rules file")
     vr.add_argument("--file", help="rules file (default: paths.rules_file)")
     ins = _sub(sp, "install", "instalar", help="install a root-owned copy from a git checkout (self-editing setups)")
@@ -379,7 +381,7 @@ def main(argv=None) -> int:
     cfg = _cfg()
     if cmd == "doctor":
         from . import doctor
-        return doctor.main(cfg, como_json=a.json)
+        return doctor.main(cfg, como_json=a.json, fix=a.fix)
     if cmd == "watch":
         from . import watch
         return watch.main(cfg, a.id, seguir=not a.no_follow, chamar=chamar)
@@ -458,19 +460,14 @@ def main(argv=None) -> int:
     if cmd == "publish":
         return _publicar(cfg, a.id, a.autorizado)
     if cmd == "wait":
-        t0 = time.time()
-        while True:
-            r = chamar(cfg, {"cmd": "ver", "id": a.id})
-            if not r.get("ok"):
-                print(r.get("erro")); return 2
-            t = r["tarefa"]
-            if t["estado"] in FINAIS:
-                print(json.dumps({"id": t["id"], "estado": t["estado"], "branch": t["branch"], "patch": t["patch"],
-                                  "resumo": (t["resumo"] or "")[:800]}, ensure_ascii=False))
-                return 0 if t["estado"] in ("em_revisao", "concluida") else 1
-            if a.timeout and time.time() - t0 > a.timeout:
-                print("timeout"); return 2
-            time.sleep(5)
+        r = chamar(cfg, {"cmd": "esperar", "id": a.id, "timeout": max(0, a.timeout)},
+                   timeout=a.timeout + 5 if a.timeout > 0 else None)
+        if not r.get("ok"):
+            print(r.get("erro")); return 2
+        t = r["tarefa"]
+        print(json.dumps({"id": t["id"], "estado": t["estado"], "branch": t["branch"], "patch": t["patch"],
+                          "resumo": (t["resumo"] or "")[:800]}, ensure_ascii=False))
+        return 0 if t["estado"] in ("em_revisao", "concluida") else 1
     req = {"cmd": {"resume": "retomar", "claude-resumed": "claude_assumiu", "briefing-status": "briefing_status",
                    "pause": "pausar", "note": "recado", "delegate": "delegar", "list": "listar", "show": "ver",
                    "result": "resultado", "cancel": "cancelar", "review": "revisar", "claim": "reivindicar"}.get(cmd, cmd)}

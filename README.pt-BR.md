@@ -77,6 +77,17 @@ padrão é **3600 segundos**, ajustável por `service.task_timeout`, `AAO_SERVIC
 Pedidos interrompidos no chat também aguardam o reset e preservam a sessão além do prazo normal de inatividade;
 cancelar um pedido pendente impede sua retomada automática.
 
+Revisões também reutilizam a thread salva. Com sessão existente, o prompt de retomada envia o snapshot atual,
+referências ao briefing/checkpoint e instruções do dono, sem repetir a tarefa e as regras completas. As regras-base
+ficam no `AGENTS.md` não versionado do workspace, junto das instruções do repo; um `AGENTS.md` versionado pelo
+próprio repo é preservado. Sem sessão salva, o serviço envia o prompt completo.
+
+`aao wait ID` aguarda a notificação do serviço pelo socket, sem consultas periódicas. `--timeout S` limita a espera;
+os códigos de saída continuam 0 para revisão/concluída, 1 para bloqueada/cancelada e 2 para timeout/indisponibilidade.
+O hook entrega apenas tarefas não vistas, marca somente as entradas entregues por inteiro e limita o texto a
+3000 caracteres (2500 no hook de prompt). As demais ficam pendentes para a próxima entrega. Um novo resultado
+da mesma tarefa volta a ser entregue. O arquivo de recado contém apenas pendências e tem teto de 12000 caracteres.
+
 ## Medição e equilíbrio de uso (1.1.0)
 
 `aao status --brief` entrega cinco linhas: uso/razão em 5 horas e 7 dias, fila, resets e teto efetivo por hora.
@@ -159,6 +170,12 @@ sudo systemctl enable --now ai-agents-orchestrator.service ai-agents-orchestrato
 aao arm             # liga a passagem de bastão automática (envia a cauda mascarada do transcript à OpenAI)
 ```
 
+O doctor verifica os sockets do serviço (`aao serve`) e do daemon root, o `BRIEFING.md` vivo e os quatro hooks
+atuais. Para plugin habilitado, confere os arquivos instalados e a versão 1.1.0 ou superior; o nome na configuração
+sozinho não basta. `aao doctor --fix` cria diretórios de estado ausentes e copia exemplos de regras-base/divisão
+somente se o destino não existir. Adapte os exemplos. Preserva arquivos existentes; não inventa briefing, altera
+credenciais nem inicia/reinicia serviços. Serviços parados continuam como falha até a intervenção do operador.
+
 Copie e adapte `rules/BASE_RULES.example.md`, `rules/DIVISION.example.md` e `templates/AGENTS.example.md` para os
 caminhos da configuração ([`examples/config.example.toml`](examples/config.example.toml)). Para testar sem conta
 nenhuma: `aao serve --dry-run`.
@@ -183,8 +200,12 @@ lateral ao vivo (API em acesso antecipado do Claude Code, pode mudar):
 `aao watch [id]` mostra tarefa, repo, branch e workspace, os eventos (comandos, arquivos editados, mensagens) e segue
 até a tarefa terminar, com o diff até o momento; `--no-follow` imprime e sai. `aao watch-open [id]` abre isso num
 split do tmux, numa janela nova de terminal, ou imprime o comando. No Claude Code: `/codex [id]`, `/codex-pane [id]`,
-ou peça em linguagem natural: *"abre o codex"*, *"mostra o que o codex está fazendo"*. É somente leitura. Exemplo
-(ilustrativo):
+ou peça em linguagem natural: *"abre o codex"*, *"mostra o que o codex está fazendo"*. É somente leitura.
+
+O seguidor verifica metadados a cada 2,5 segundos e só relê o SQLite quando mudam os eventos ou o checkpoint.
+Mudanças de estado também geram eventos, inclusive em tarefas que falham antes de iniciar o motor.
+
+Exemplo (ilustrativo):
 
 ```
 == Codex on task #12: Validar e-mails do cadastro [in progress]

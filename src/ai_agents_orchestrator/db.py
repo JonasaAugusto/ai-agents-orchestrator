@@ -176,6 +176,8 @@ class Quadro:
     def __init__(self, caminho: Path):
         self.caminho = Path(caminho)
         self._lock = threading.RLock()
+        self.mudou = threading.Condition(self._lock)
+        self.ao_mudar = None  # optional service callback: writes a task-state event after persistence
         self.c = _conn(self.caminho)
         with self._lock:
             self.c.executescript("""
@@ -262,6 +264,9 @@ class Quadro:
         cols = ",".join(f"{k}=?" for k in campos)
         with self._lock:
             self.c.execute(f"UPDATE tarefas SET {cols}, atualizado=? WHERE id=?", (*campos.values(), agora, tid))
+            if self.ao_mudar and "estado" in campos:
+                self.ao_mudar(tid, campos["estado"])
+            self.mudou.notify_all()
             return self.ver(tid)
 
     # ---- locks / conflicts

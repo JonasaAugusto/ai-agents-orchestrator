@@ -103,19 +103,34 @@ def diff_stat(ws: str | None) -> str:
 
 
 def main(cfg, tid: int | None = None, seguir: bool = True, chamar=None, saida=print, dormir=time.sleep,
-         max_ciclos: int | None = None, intervalo: float = 1.0) -> int:
+         max_ciclos: int | None = None, intervalo: float = 2.5) -> int:
     tid = tid if tid is not None else tarefa_padrao(cfg, chamar)
     if tid is None:
         saida("watch: no running task and no task with an event log yet")
         return 1
+    log = cfg.resultados / str(tid) / "events.jsonl"
+    checkpoint = log.with_name("HANDOFF.md")
+
+    def assinatura(path):
+        try:
+            st = path.stat()
+            return st.st_ino, st.st_size, st.st_mtime_ns
+        except FileNotFoundError:
+            return None
+
+    anterior = (assinatura(log), assinatura(checkpoint))
     t = tarefa(cfg, tid) or {}
     saida(f"== Codex on task #{tid}: {t.get('titulo', '?')} [{ESTADOS_EN.get(t.get('estado'), t.get('estado', '?'))}]")
     saida(f"   repo: {t.get('repo') or '-'}  branch: {t.get('branch') or '-'}")
     saida(f"   workspace: {t.get('workspace') or '-'}")
-    log = cfg.resultados / str(tid) / "events.jsonl"
     pos, ciclos = 0, 0
+    primeira = True
     while True:
-        if log.exists():
+        atual = (assinatura(log), assinatura(checkpoint))
+        mudou = atual != anterior
+        if atual[0] and (primeira or atual[0] != anterior[0]):
+            if anterior[0] and (atual[0][0] != anterior[0][0] or atual[0][1] < pos):
+                pos = 0
             with open(log, "rb") as f:
                 f.seek(pos)
                 for linha in f:
@@ -128,7 +143,9 @@ def main(cfg, tid: int | None = None, seguir: bool = True, chamar=None, saida=pr
                         continue
                     if txt:
                         saida(txt)
-        t = tarefa(cfg, tid) or t
+        if mudou:
+            t = tarefa(cfg, tid) or t
+        anterior, primeira = atual, False
         ciclos += 1
         if not seguir or t.get("estado") in FINAIS or (max_ciclos is not None and ciclos >= max_ciclos):
             break

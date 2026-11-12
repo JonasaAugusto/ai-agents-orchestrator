@@ -69,7 +69,8 @@ class HookPrompt(Base):
                 cli._hook_prompt(self.cfg, "UserPromptSubmit")
             self.assertNotIn("Redesenhar tela", buf.getvalue())
             self.assertIn("#1 state=pending", buf.getvalue())
-            self.assertIn("recado_lido", calls)  # sem fallback ativo: nao "takes the baton" nem avisa o dono
+            self.assertNotIn("recado_lido", calls)  # delivery atomically acknowledges only the delivered delta
+            self.assertEqual(self.quadro.ver(1)["visto_claude"], 1)
             self.assertNotIn("claude_assumiu", calls)
             self.assertEqual(self.tr.enviados(), [])
             buf = io.StringIO()

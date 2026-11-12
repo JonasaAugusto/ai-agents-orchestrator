@@ -34,6 +34,7 @@ class AmbienteFalso(doctor.Ambiente):
 
     def usuario_existe(self, nome): return self.usuario
     def euid(self): return 1000
+    def socket_ativo(self, path): return True
 
     def stat(self, p):
         p = str(p)

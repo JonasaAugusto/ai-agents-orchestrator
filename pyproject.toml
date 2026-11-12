@@ -38,3 +38,6 @@ ai-agents-orchestrator = "ai_agents_orchestrator.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/ai-agents-orchestrator/rules" = ["rules/BASE_RULES.example.md", "rules/DIVISION.example.md"]

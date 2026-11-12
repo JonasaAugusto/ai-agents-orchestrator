@@ -30,9 +30,11 @@ class Watch(Base):
         tid = self.rodar_tarefa()
         log = self.cfg.resultados / str(tid) / "events.jsonl"
         linhas = log.read_text().splitlines()
-        self.assertEqual(len(linhas), len(EVENTOS))
+        eventos = [json.loads(linha)['ev'] for linha in linhas]
+        self.assertEqual(len([ev for ev in eventos if ev['type'] != 'task.state']), len(EVENTOS))
         self.assertNotIn(FAKE_SK, log.read_text())
-        self.assertEqual(json.loads(linhas[0])["ev"]["type"], "thread.started")
+        self.assertEqual(eventos[0], {"type": "task.state", "state": "em_andamento"})
+        self.assertEqual(eventos[-1], {"type": "task.state", "state": "em_revisao"})
 
     def test_watch_reproduz_e_termina_quando_a_tarefa_acaba(self):
         tid = self.rodar_tarefa()

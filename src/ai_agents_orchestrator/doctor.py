@@ -9,9 +9,11 @@ import json
 import math
 import os
 import shutil
+import socket
 import sqlite3
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -73,6 +75,82 @@ class Ambiente:
         import importlib.util
         return importlib.util.find_spec(nome) is not None
 
+    def socket_ativo(self, caminho: Path) -> bool:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as cliente:
+                cliente.settimeout(2)
+                cliente.connect(str(caminho))
+            return True
+        except OSError:
+            return False
+
+
+HOOKS_ATUAIS = {"StopFailure": "aao claude-limit", "UserPromptSubmit": "aao hook-prompt",
+                "SessionStart": "aao hook-prompt", "Stop": "aao claude-usage"}
+
+
+def _json(amb: Ambiente, path: Path) -> dict:
+    try:
+        d = json.loads(amb.ler(path) or "{}")
+        return d if isinstance(d, dict) else {}
+    except ValueError:
+        return {}
+
+
+def _hooks_presentes(d: dict) -> set[str]:
+    hooks = d.get("hooks")
+    if not isinstance(hooks, dict):
+        return set()
+    achados = set()
+    for evento, comando in HOOKS_ATUAIS.items():
+        grupos = hooks.get(evento, [])
+        if not isinstance(grupos, list):
+            continue
+        for grupo in grupos:
+            if not isinstance(grupo, dict) or not isinstance(grupo.get("hooks"), list):
+                continue
+            if evento == "StopFailure" and grupo.get("matcher") != "rate_limit":
+                continue
+            for h in grupo["hooks"]:
+                if not isinstance(h, dict) or h.get("type") != "command":
+                    continue
+                cmd = h.get("command", "")
+                if isinstance(cmd, str) and (cmd == comando or cmd.startswith(comando + " ")):
+                    achados.add(evento)
+    return achados
+
+
+def hooks_instalados(amb: Ambiente, settings: list[Path] | None = None) -> set[str]:
+    """Check effective settings or the enabled plugin's installed manifest and hook file."""
+    achados = set()
+    for path in settings or [Path.home() / ".claude/settings.json"]:
+        d = _json(amb, path)
+        achados |= _hooks_presentes(d)
+        enabled = d.get("enabledPlugins")
+        if not isinstance(enabled, dict):
+            continue
+        registry = _json(amb, path.parent / "plugins/installed_plugins.json").get("plugins", {})
+        if not isinstance(registry, dict):
+            continue
+        for nome, ativo in enabled.items():
+            if ativo is not True or nome.split("@")[0] != "ai-agents-orchestrator":
+                continue
+            installs = registry.get(nome, [])
+            if not isinstance(installs, list):
+                continue
+            for install in installs:
+                if not isinstance(install, dict) or not isinstance(install.get("installPath"), str):
+                    continue
+                raiz = Path(install["installPath"])
+                manifest = _json(amb, raiz / ".claude-plugin/plugin.json")
+                try:
+                    versao = tuple(int(x) for x in str(manifest.get("version", "")).split("."))
+                except ValueError:
+                    continue
+                if manifest.get("name") == "ai-agents-orchestrator" and versao >= (1, 1, 0):
+                    achados |= _hooks_presentes(_json(amb, raiz / "hooks/hooks.json"))
+    return achados
+
 
 def comando_login(cfg: Config, device: bool = True) -> str:
     return (f"sudo -u {cfg.service_user} env HOME={cfg.state_dir} CODEX_HOME={cfg.codex_home} "
@@ -105,18 +183,10 @@ def checar_claude(cfg: Config, amb: Ambiente, settings: list[Path] | None = None
                           "Install Claude Code for the user that runs your interactive sessions."))
     else:
         itens.append(Item("claude CLI", OK, "installed"))
-    settings = settings or [Path.home() / ".claude" / "settings.json"]
-    achou_hook = achou_plugin = False
-    for s in settings:
-        txt = amb.ler(s) or ""
-        if "claude-limit" in txt or "claude-limite" in txt:
-            achou_hook = True
-        if "ai-agents-orchestrator" in txt:
-            achou_plugin = True
-    if achou_hook or achou_plugin:
-        itens.append(Item("claude hooks", OK, "handoff hooks or plugin found in Claude Code settings"))
+    if set(HOOKS_ATUAIS) <= hooks_instalados(amb, settings):
+        itens.append(Item("claude hooks", OK, "all 1.1.0 handoff, prompt and usage hooks confirmed"))
     else:
-        itens.append(Item("claude hooks", AVISO, "no handoff hooks found",
+        itens.append(Item("claude hooks", AVISO, "current handoff, prompt and usage hooks not confirmed",
                           "Install the Claude Code plugin from claude-plugin/ (see README) or merge "
                           "examples/claude-hooks.json into ~/.claude/settings.json; then run `aao arm`."))
     return itens
@@ -259,7 +329,19 @@ def diagnosticar(cfg: Config, amb: Ambiente | None = None, settings: list[Path] 
     amb = amb or Ambiente()
     return (checar_base(cfg, amb) + checar_codex(cfg, amb) + checar_claude(cfg, amb, settings)
             + checar_canal(cfg, amb) + checar_repos(cfg, amb) + checar_agendamento(cfg)
-            + checar_medicao(cfg, amb, settings))
+            + checar_medicao(cfg, amb, settings) + checar_runtime(cfg, amb))
+
+
+def checar_runtime(cfg: Config, amb: Ambiente) -> list[Item]:
+    itens = []
+    for nome, caminho in (("service socket", cfg.socket_path), ("root daemon socket", cfg.root_socket)):
+        ativo = amb.socket_ativo(caminho)
+        itens.append(Item(nome, OK if ativo else FALHA, "accepting connections" if ativo else "not accepting connections",
+                          "Ask the operator to check aao serve / aao root-daemon and their configured sockets." if not ativo else ""))
+    existe = amb.stat(cfg.para_codex / "BRIEFING.md") is not None
+    itens.append(Item("live briefing", OK if existe else AVISO, "found" if existe else "BRIEFING.md missing",
+                      "Ask Claude to write the live briefing; doctor --fix never invents context." if not existe else ""))
+    return itens
 
 
 def checar_medicao(cfg: Config, amb: Ambiente | None = None, settings: list[Path] | None = None) -> list[Item]:
@@ -274,8 +356,7 @@ def checar_medicao(cfg: Config, amb: Ambiente | None = None, settings: list[Path
     itens.append(Item("usage quotas", AVISO if faltam else OK,
                       "unknown: " + ", ".join(faltam) if faltam else "token quotas configured",
                       "Calibrate [balance] token quotas; unknown usage never triggers routing. Codex account limits take precedence." if faltam else ""))
-    textos = [amb.ler(p) or "" for p in (settings or [Path.home() / ".claude" / "settings.json"])]
-    achou = any("claude-usage" in txt for txt in textos)
+    achou = "Stop" in hooks_instalados(amb, settings)
     itens.append(Item("claude usage hook", OK if achou else AVISO,
                       "Stop counter hook found" if achou else "Stop counter hook not confirmed",
                       "Update the plugin to 1.1.0 or merge examples/claude-hooks.json; Stop must run aao claude-usage." if not achou else ""))
@@ -296,8 +377,58 @@ def checar_medicao(cfg: Config, amb: Ambiente | None = None, settings: list[Path
     return itens
 
 
-def main(cfg: Config, como_json: bool = False, amb: Ambiente | None = None, saida=print, settings=None) -> int:
-    itens = diagnosticar(cfg, amb, settings)
+def corrigir_triviais(cfg: Config) -> list[Item]:
+    """Only missing directories and example rules; never credentials, services or existing files."""
+    itens = []
+    import pwd
+    try:
+        uid = pwd.getpwnam(cfg.service_user).pw_uid if os.geteuid() == 0 else None
+    except KeyError:
+        uid = None
+
+    def criar_diretorios(path: Path, modo: int, dono: int | None = None) -> None:
+        faltam = []
+        while not path.exists():
+            faltam.append(path)
+            path = path.parent
+        for path in reversed(faltam):
+            try:
+                path.mkdir(mode=modo)
+            except FileExistsError:
+                continue
+            path.chmod(modo)  # examples/state must remain usable even with umask 077
+            if dono is not None:
+                os.chown(path, dono, -1)
+
+    dirs = (cfg.state_dir, cfg.spool, cfg.workspaces, cfg.resultados, cfg.handoffs, cfg.para_claude,
+            cfg.para_codex, cfg.para_codex / "tarefas", cfg.logs, cfg.codex_home)
+    for path in dirs:
+        try:
+            criar_diretorios(path, 0o700, uid)
+        except OSError as e:
+            itens.append(Item("fix directories", FALHA, f"{path}: {type(e).__name__}"))
+    roots = (Path(__file__).resolve().parents[2] / "rules", Path(sys.prefix) / "share/ai-agents-orchestrator/rules")
+    for nome, destino in (("BASE_RULES", cfg.rules_file), ("DIVISION", cfg.division_file)):
+        if destino.exists():
+            continue
+        origem = next((r / f"{nome}.example.md" for r in roots if (r / f"{nome}.example.md").is_file()), None)
+        try:
+            if origem is None:
+                raise FileNotFoundError("example rules not installed")
+            criar_diretorios(destino.parent, 0o755)
+            with destino.open("x", encoding="utf-8") as f:
+                os.fchmod(f.fileno(), 0o644)
+                f.write(origem.read_text(encoding="utf-8"))
+            itens.append(Item("fix rules", INFO, f"created example {destino}; adapt it to your team"))
+        except FileExistsError:
+            pass
+        except OSError as e:
+            itens.append(Item("fix rules", FALHA, f"{destino}: {type(e).__name__}"))
+    return itens
+
+
+def main(cfg: Config, como_json: bool = False, amb: Ambiente | None = None, saida=print, settings=None, fix=False) -> int:
+    itens = (corrigir_triviais(cfg) if fix else []) + diagnosticar(cfg, amb, settings)
     if como_json:
         saida(json.dumps([i.__dict__ for i in itens], ensure_ascii=False, indent=1))
     else:

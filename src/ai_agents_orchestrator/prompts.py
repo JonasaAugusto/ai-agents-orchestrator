@@ -112,6 +112,12 @@ def prompt_tarefa(t: dict, *, branch: str, base: str, briefing_tarefa: bool, ret
     extra = f"\nADDITIONAL INSTRUCTION FROM THE OWNER:\n{t['instrucoes']}\n" if t.get("instrucoes") else ""
     bt = f"\nBriefing for this task: {pc}/tarefas/{t['id']}.md (read it)." if briefing_tarefa else ""
     kind = t.get("kind", "dev")
+    if retomada:
+        modo = "CROSS-REVIEW, read-only; change nothing" if kind == "revisao" else "continue the existing work"
+        return f"""{_bloco(snapshot)}Resume task #{t['id']}: {modo}.
+Read the current AGENTS.md instructions in the workspace and {pc}/BRIEFING.md.{bt}
+{extra}
+Preserve completed work. Report the outcome; the first line must be {ESTADO_LINHA}."""
     if kind == "revisao":
         return f"""{_bloco(snapshot)}{regras_base()}
 
