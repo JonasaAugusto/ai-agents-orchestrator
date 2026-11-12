@@ -200,7 +200,7 @@ class Assistente:
                 s("  use letters, digits, '.', '_' or '-'")
                 continue
             gh = self.pergunta("GitHub owner/repo (empty for a local-only repo)", "")
-            spec = {"base_branch": self.pergunta("Base branch", "main")}
+            spec: dict[str, object] = {"base_branch": self.pergunta("Base branch", "main")}
             if gh:
                 spec["github"] = gh
                 if self.sim("Allow approved interactive publishing to it?" if lite else

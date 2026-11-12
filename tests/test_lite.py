@@ -324,7 +324,9 @@ class LiteWorkflow(Base):
         self.assertEqual(briefing.read_text(), "Task-specific context")
         # No Windows o diretório temporário vem com nome curto (RUNNER~1); o serviço registra o caminho resolvido.
         prompt = self.codex.chamadas[0]["prompt"]
-        self.assertTrue(str(briefing) in prompt or str(briefing.resolve()) in prompt, prompt[:300])
+        # O prompt usa "/" como separador mesmo no Windows.
+        prompt = prompt.replace("\\", "/")
+        self.assertTrue(briefing.as_posix() in prompt or briefing.resolve().as_posix() in prompt, prompt[:300])
         self.assertIn("updated app.py", result["resumo"])
         self.assertTrue(self.svc.comando({"cmd": "briefing_status"})["ok"])
         self.assertIn(f"#{task['id']}", self.svc.comando({"cmd": "recado"})["texto"])
