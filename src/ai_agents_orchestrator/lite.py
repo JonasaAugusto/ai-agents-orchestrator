@@ -56,6 +56,47 @@ def write_private(path: Path, text: str) -> None:
 lock = compat.file_lock
 
 
+def nome_pasta_projeto(caminho: str | os.PathLike) -> str:
+    """Claude Code names a project's transcript folder after its path, every non-alphanumeric char becoming '-'."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(caminho))
+
+
+def pasta_do_projeto(cfg) -> tuple[Path, str]:
+    """Transcript folder of the project in use and where that choice came from.
+
+    Order: explicit `lite.transcripts_project`; else the directory where `aao serve` runs; else a transcripts
+    directory that already is a single project folder (jsonl files directly inside)."""
+    raiz = cfg.fonte_transcripts
+    explicito = (getattr(cfg, "transcripts_project", "") or "").strip()
+    if explicito:
+        # Either the encoded folder name already, or a project path (which gets encoded like Claude Code does).
+        direto = raiz / explicito
+        if not re.search(r"[\\/:]", explicito) and direto.is_dir():
+            return direto, "lite.transcripts_project"
+        return raiz / nome_pasta_projeto(explicito), "lite.transcripts_project"
+    atual = raiz / nome_pasta_projeto(os.getcwd())
+    if atual.is_dir():
+        return atual, "cwd"
+    # fonte_transcripts já aponta para a pasta de um projeto (jsonl direto, sem subpastas de projeto).
+    return (raiz, "transcripts dir") if any(raiz.glob("*.jsonl")) else (atual, "cwd")
+
+
+def diagnostico_transcripts(cfg) -> tuple[str, str, str]:
+    """(state, message, fix) for the lite transcript mirror; states use the doctor values "ok", "warn" and "FAIL"."""
+    pasta, origem = pasta_do_projeto(cfg)
+    if pasta.is_dir() and any(pasta.glob("*.jsonl")):
+        return "ok", f"mirroring {pasta} (chosen by {origem})", ""
+    chave = "[lite] transcripts_project = \"<full path of your project folder>\""
+    if origem == "lite.transcripts_project":
+        return ("FAIL", f"lite.transcripts_project = {cfg.transcripts_project!r} points to {pasta}, which has no "
+                "Claude Code transcripts", "Fix the value in config.toml, or open that project once in Claude Code.")
+    if not cfg.fonte_transcripts.is_dir():
+        return ("warn", f"transcripts directory {cfg.fonte_transcripts} does not exist yet",
+                "Use Claude Code once, or set paths.claude_transcripts to the right directory.")
+    return ("warn", f"no Claude Code transcripts for the folder where aao serve runs ({pasta})",
+            f"Set it explicitly in config.toml: {chave}; or start aao serve from your project folder.")
+
+
 class LocalBackend:
     def __init__(self, cfg: Config, *, approved_cli: bool = False):
         self.cfg, self.approved_cli = cfg, approved_cli
@@ -133,12 +174,7 @@ class LocalBackend:
         return fontes[:self.MAX_WORKSPACES_ESPELHADOS]
 
     def _pasta_do_projeto(self) -> Path:
-        raiz = self.cfg.fonte_transcripts
-        atual = raiz / re.sub(r"[^A-Za-z0-9]", "-", os.getcwd())
-        if atual.is_dir():
-            return atual
-        # fonte_transcripts já aponta para a pasta de um projeto (jsonl direto, sem subpastas de projeto).
-        return raiz if any(raiz.glob("*.jsonl")) else atual
+        return pasta_do_projeto(self.cfg)[0]
 
     def _mirror(self, hook=None, session=None, usage=False):
         cfg = self.cfg

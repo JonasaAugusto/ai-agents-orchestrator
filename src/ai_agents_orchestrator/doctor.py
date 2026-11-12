@@ -304,6 +304,9 @@ def checar_base(cfg: Config, amb: Ambiente) -> list[Item]:
                           "Use WSL2 for a Linux sandbox; install aao, git, codex and claude together inside WSL2. Never disable the sandbox to fix compatibility."))
         itens.append(Item("Windows paths", INFO, "Git workspaces use core.longpaths=true and autocrlf=false; prefer a short state directory for third-party tools."))
     if cfg.mode == "lite":
+        from .lite import diagnostico_transcripts
+        estado, msg, fix = diagnostico_transcripts(cfg)
+        itens.append(Item("transcripts project", estado, msg, fix))
         itens.append(Item("runtime mode", AVISO, "lite: current user, no systemd; no isolation from engines and no Publish button",
                           "Review results, then use aao publish <id> at a terminal and confirm the full SHA."))
     elif amb.usuario_existe(cfg.service_user):

@@ -35,7 +35,9 @@ def gerar_toml(r: dict) -> str:
               "", "[service]", f"channel = {_toml_str(r['channel'])}", f"user = {_toml_str(r['user'])}",
               f"timezone = {_toml_str(r['timezone'])}", f"orchestrator = {_toml_str(r.get('orchestrator', 'claude'))}",
               "", "[paths]", f"state_dir = {_toml_str(r['state_dir'])}",
-              f"claude_transcripts = {_toml_str(r['claude_transcripts'])}", "", "[codex]",
+              f"claude_transcripts = {_toml_str(r['claude_transcripts'])}", "",
+              *(["[lite]", f"transcripts_project = {_toml_str(r['transcripts_project'])}", ""]
+                if r.get("transcripts_project") else []), "[codex]",
               f"network_access = {'true' if r.get('codex_full') else 'false'}",
               f"full_access = {'true' if r.get('codex_full') else 'false'}  # DANGER: true disables the Codex sandbox",
               f"full_access_read_only = {'true' if r.get('codex_full') else 'false'}  # also read-only phases", "",
@@ -163,6 +165,9 @@ class Assistente:
         r["timezone"] = self.pergunta("Timezone (IANA name)", "UTC")
         r["claude_transcripts"] = self.pergunta("Claude Code project transcripts dir to mirror",
                                                 str(Path.home() / ".claude" / "projects" / ("" if lite else "-root")))
+        if lite:
+            r["transcripts_project"] = self.pergunta(
+                "Project folder whose Claude Code transcripts to mirror (full path; empty = the folder where aao serve runs)", "")
         r["orchestrator"] = self.pergunta("Who coordinates the work? claude / codex (the other executes and reviews)", "claude",
                                           lambda v: v.lower() in ("claude", "codex")).lower()
         s("\nCodex permissions. 'restricted' keeps Codex in its sandbox, without network, in throwaway clones (safest). "
@@ -218,6 +223,9 @@ class Assistente:
             cfg = config.carregar({}, self.config_file)
             doctor.corrigir_triviais(cfg)
             self.configurar_clis(cfg)
+            from .lite import diagnostico_transcripts
+            estado, msg, fix = diagnostico_transcripts(cfg)
+            s(f"Transcripts: {estado}. {msg}" + (f" {fix}" if fix else ""))
             s("Lite: same user as your engines; no isolation or Publish button. Approval: aao publish <id> (ID SHA).")
             s("Next: aao doctor; run aao serve in a terminal. No sudo or systemd needed.")
             return 0

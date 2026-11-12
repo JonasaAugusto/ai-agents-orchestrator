@@ -105,6 +105,9 @@ class Config:
     root_state: Path = Path(f"/var/lib/{NOME}-root")  # bare clones used by the root daemon for pushes (root only)
     fonte_transcripts: Path = Path("/root/.claude/projects/-root")  # Claude Code transcripts of the watched project
     fonte_memoria: Path = Path("/root/.claude/projects/-root/memory")  # Claude Code memory files (optional)
+    # Lite mirror: project whose Claude Code transcripts are mirrored (a project directory such as C:\\Users\\me\\app,
+    # or the encoded folder name under fonte_transcripts). Empty = derive it from the directory where `aao serve` runs.
+    transcripts_project: str = ""
     codex_bin: str = "codex"
     claude_bin: str = "claude"
     service_user: str = "aao"  # unprivileged system user that runs the service (and Codex)
@@ -233,6 +236,7 @@ ENV_MAP: dict[str, tuple[str, type]] = {
     "balance.max_age_seconds": ("balance_max_age_seconds", int),
     "paths.state_dir": ("state_dir", Path), "paths.root_state_dir": ("root_state", Path),
     "paths.claude_transcripts": ("fonte_transcripts", Path), "paths.claude_memory": ("fonte_memoria", Path),
+    "lite.transcripts_project": ("transcripts_project", str),
     "paths.claude_sessions": ("claude_sessions_dir", Path), "paths.rules_file": ("rules_file", Path),
     "paths.division_file": ("division_file", Path), "paths.templates_dir": ("templates_dir", Path),
     "paths.socket": ("socket", Path), "paths.root_socket": ("root_socket", Path),

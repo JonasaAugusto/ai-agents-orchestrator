@@ -28,7 +28,7 @@ def main():
                                   capture_output=True, text=True, encoding="utf-8", timeout=30, env=env, cwd=root)
 
         # Real guided setup, with no engine installed in this disposable user's PATH.
-        answers = "\n".join(["lite", str(root / "state"), "UTC", "", "codex", "restricted", ""]) + "\n"
+        answers = "\n".join(["lite", str(root / "state"), "UTC", "", "", "codex", "restricted", ""]) + "\n"
         result = run("setup", stdin=answers)
         assert result.returncode == 0, result.stderr + result.stdout
         assert config.is_file()

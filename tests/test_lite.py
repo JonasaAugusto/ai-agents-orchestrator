@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 from unittest import mock
 
-from ai_agents_orchestrator import assistente, cli, compat, config, doctor, engines, workspace
+from ai_agents_orchestrator import assistente, cli, compat, config, doctor, engines, lite, workspace
 from tests.helpers import Base, sh
 from tests.test_doctor_setup import AmbienteFalso
 
@@ -64,7 +64,7 @@ class LiteSetup(unittest.TestCase):
             root = Path(tmp)
             selected = root / "selected.toml"
             old = root / "unselected.toml"
-            answers = iter(["lite", str(root / "state"), "UTC", "", "codex", "restricted", "", "y"])
+            answers = iter(["lite", str(root / "state"), "UTC", "", "", "codex", "restricted", "", "y"])
             with patch.dict(os.environ, {"AAO_CONFIG": str(selected)}), patch.object(config, "CONFIG_FILE", old):
                 wizard = assistente.Assistente(entrada=lambda _: next(answers), saida=lambda _: None,
                                                amb=AmbienteFalso())
@@ -75,7 +75,7 @@ class LiteSetup(unittest.TestCase):
     def test_setup_installs_plugin_checks_login_and_preserves_second_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "config.toml"
-            answers = iter(["lite", str(Path(tmp) / "state"), "UTC", "", "codex", "restricted", "", "y"])
+            answers = iter(["lite", str(Path(tmp) / "state"), "UTC", "", "", "codex", "restricted", "", "y"])
             amb = AmbienteFalso()
             out = []
             wizard = assistente.Assistente(config_file=p, env_file=Path(tmp) / "env",
@@ -95,7 +95,7 @@ class LiteSetup(unittest.TestCase):
     def test_setup_does_not_install_plugin_without_confirmation(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "config.toml"
-            answers = iter(["lite", str(Path(tmp) / "state"), "UTC", "", "codex", "restricted", "", "n"])
+            answers = iter(["lite", str(Path(tmp) / "state"), "UTC", "", "", "codex", "restricted", "", "n"])
             amb = AmbienteFalso()
             wizard = assistente.Assistente(config_file=p, env_file=Path(tmp) / "env",
                 entrada=lambda _: next(answers), saida=lambda _: None, amb=amb)
@@ -111,6 +111,103 @@ class LiteSetup(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs["env"], env)
         with patch("subprocess.run", side_effect=FileNotFoundError):
             self.assertFalse(runner.disponivel())
+
+
+class LiteTranscriptsProject(unittest.TestCase):
+    """The mirrored project must not depend only on the directory where `aao serve` happens to run."""
+
+    def setUp(self):
+        self.addCleanup(config.definir_fuso, config.nome_fuso())
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.transcripts = self.root / "projects"
+        self.project = self.root / "my app"          # a path with a space, as on Windows profiles
+        self.folder = self.transcripts / lite.nome_pasta_projeto(self.project)
+        self.folder.mkdir(parents=True)
+        (self.folder / "s.jsonl").write_text(json.dumps(
+            {"type": "user", "timestamp": "2026-11-12T12:00:00Z", "message": {"content": "from the project"}}) + "\n")
+        self.cfg = config.Config(mode="lite", state_dir=self.root / "state", fonte_transcripts=self.transcripts,
+                                 fonte_memoria=self.transcripts / "memory")
+
+    def test_config_key_comes_from_toml_and_environment(self):
+        path = self.root / "config.toml"
+        path.write_text('mode = "lite"\n[lite]\ntranscripts_project = "C:\\\\Users\\\\me\\\\app"\n', encoding="utf-8")
+        self.assertEqual(config.carregar({"AAO_CONFIG": str(path)}).transcripts_project, "C:\\Users\\me\\app")
+        env = {"AAO_CONFIG": str(path), "AAO_LITE_TRANSCRIPTS_PROJECT": "/work/other"}
+        self.assertEqual(config.carregar(env).transcripts_project, "/work/other")
+
+    def test_explicit_project_wins_over_cwd(self):
+        self.cfg.transcripts_project = str(self.project)
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        old = os.getcwd()
+        self.addCleanup(os.chdir, old)
+        os.chdir(elsewhere)
+        pasta, origem = lite.pasta_do_projeto(self.cfg)
+        self.assertEqual((pasta, origem), (self.folder, "lite.transcripts_project"))
+
+    def test_without_explicit_value_cwd_is_still_used(self):
+        old = os.getcwd()
+        self.addCleanup(os.chdir, old)
+        self.project.mkdir()
+        os.chdir(self.project)
+        self.assertEqual(lite.pasta_do_projeto(self.cfg)[1], "cwd")
+        self.assertEqual(lite.pasta_do_projeto(self.cfg)[0].name, lite.nome_pasta_projeto(os.getcwd()))
+
+    def test_encoded_folder_name_is_accepted(self):
+        self.cfg.transcripts_project = self.folder.name
+        self.assertEqual(lite.pasta_do_projeto(self.cfg)[0], self.folder)
+
+    def test_windows_style_path_is_encoded_like_claude_code(self):
+        self.assertEqual(lite.nome_pasta_projeto("C:\\Users\\me\\my app"), "C--Users-me-my-app")
+
+    def test_mirror_reads_explicit_project_when_cwd_differs(self):
+        self.cfg.transcripts_project = str(self.project)
+        self.cfg.mirror.mkdir(parents=True, exist_ok=True)
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        old = os.getcwd()
+        self.addCleanup(os.chdir, old)
+        os.chdir(elsewhere)
+        backend = lite.LocalBackend(self.cfg)
+        self.addCleanup(lambda: None)
+        result = backend._mirror()
+        self.assertTrue(result["ok"], result)
+        self.assertIn("from the project", (self.cfg.mirror / "transcript-cauda.jsonl").read_text())
+
+    def test_diagnostics_explain_each_case(self):
+        self.cfg.transcripts_project = str(self.project)
+        self.assertEqual(lite.diagnostico_transcripts(self.cfg)[0], "ok")
+        self.cfg.transcripts_project = str(self.root / "typo")
+        estado, msg, fix = lite.diagnostico_transcripts(self.cfg)
+        self.assertEqual(estado, "FAIL")
+        self.assertIn("lite.transcripts_project", msg)
+        self.assertIn("typo", msg)
+        self.cfg.transcripts_project = ""
+        old = os.getcwd()
+        self.addCleanup(os.chdir, old)
+        os.chdir(self.root)
+        estado, msg, fix = lite.diagnostico_transcripts(self.cfg)
+        self.assertEqual(estado, "warn")
+        self.assertIn("transcripts_project", fix)
+
+    def test_doctor_reports_the_check_in_lite(self):
+        self.cfg.transcripts_project = str(self.root / "typo")
+        items = doctor.checar_base(self.cfg, AmbienteFalso())
+        item = next(i for i in items if i.nome == "transcripts project")
+        self.assertEqual(item.estado, doctor.FALHA)
+
+    def test_setup_asks_and_writes_the_project(self):
+        path = self.root / "setup" / "config.toml"
+        answers = iter(["lite", str(self.root / "st"), "UTC", str(self.transcripts), str(self.project),
+                        "codex", "restricted", "", "n"])
+        out = []
+        wizard = assistente.Assistente(config_file=path, env_file=self.root / "env", entrada=lambda _: next(answers),
+                                       saida=out.append, amb=AmbienteFalso())
+        self.assertEqual(wizard.executar(), 0)
+        self.assertEqual(config.carregar({}, path).transcripts_project, str(self.project))
+        self.assertTrue(any(line.startswith("Transcripts: ok") for line in out), out)
 
 
 class LiteWorkflow(Base):

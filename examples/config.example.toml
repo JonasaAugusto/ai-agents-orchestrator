@@ -23,6 +23,10 @@ commit_author_name = "Orchestrator Agent"
 commit_author_email = "agent@localhost"
 # self_repo = "ai-agents-orchestrator"   # name of this project's own repo in [repos], if the agent may edit it
 
+[lite]
+# Lite mode only: the project whose Claude Code transcripts are mirrored. Without it, the folder where `aao serve` runs.
+# transcripts_project = "C:\\Users\\you\\projects\\yourproject"   # or "/home/you/projects/yourproject"
+
 [paths]
 # Parent must be root-controlled. Root-generated mirror/repos use the sibling <state_dir>-root-shared.
 state_dir = "/var/lib/ai-agents-orchestrator"
