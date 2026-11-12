@@ -443,6 +443,10 @@ class Publicar(Base):
         audit = (self.cfg.shared_state / "private" / "auditoria-workspace.jsonl" if os.geteuid() == 0
                  else self.cfg.logs / "auditoria.jsonl")
         self.assertEqual(audit.read_text().count("merge+push"), 1)
+        for _ in range(50):  # o estado vira "concluida" um instante antes do botao de producao ser enviado
+            if "Deploy to production" in [r for r, _ in self.botoes_enviados()]:
+                break
+            time.sleep(0.1)
         self.assertIn("Deploy to production", [r for r, _ in self.botoes_enviados()])
         self.assertFalse(any(c[0] == "publicar" for c in self.root.chamadas))  # nada em producao ainda
         self.apertar("Deploy to production")
