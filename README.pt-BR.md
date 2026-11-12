@@ -18,8 +18,7 @@ publicado sem a sua aprovação explícita.
 - **Resultado honesto.** Tarefa cujo relatório diz `partial` ou `blocked` nunca aparece como concluída.
 - **Python com dependências mínimas.** No Windows, `tzdata` fornece os fusos IANA; o canal de chat recomendado é o Telegram. A CI tem alvo Python 3.11–3.14 em Linux, macOS e Windows; o serviço privilegiado exige Linux/systemd.
 
-A documentação completa (tabelas de comandos, referência do CLI, configuração, FAQ) está no [README em inglês](README.md);
-este arquivo resume o essencial em português. Seções só em inglês: [Features](README.md#features), [Telegram commands](README.md#telegram-commands), [CLI reference](README.md#cli-reference), [Configuration](README.md#configuration), [FAQ](README.md#faq), [Roadmap](README.md#roadmap).
+Este arquivo é a versão em português do [README em inglês](README.md), seção por seção; se algo divergir, o inglês vale. Os apelidos de comandos e flags em português são só de compatibilidade.
 
 Comece pelo [Início rápido](#início-rápido-modo-leve-121) logo abaixo ou pelos [Primeiros 10 minutos](docs/first-10-minutes.md), com saída capturada sem credenciais.
 Veja também [contribuição](CONTRIBUTING.md), [conduta](CODE_OF_CONDUCT.md) e [segurança](SECURITY.md).
@@ -257,6 +256,22 @@ contexto pelo Codex: são alavancas independentes de custo, com impacto na veloc
 execuções observadas e sessões espelhadas; só importa registros presentes na cauda recente limitada. Arquivos
 separados de subagentes, sessões perdidas e histórico antigo não são reconstruídos. Atualize o plugin ou mescle
 [claude-hooks.json](examples/claude-hooks.json) e calibre as cotas antes de usar a razão para decisões.
+
+## Recursos
+
+| Área | O que você recebe |
+| --- | --- |
+| Quadro de tarefas | Quadro SQLite compartilhado por Claude e Codex; donos, origens, dependências, travas por sobreposição de arquivos, limites por hora |
+| Delegação | `aao delegate`, `aao wait`, briefings por tarefa, `aao review` para revisão cruzada pelo Codex |
+| Estados honestos | `completed` / `partial` / `blocked` lidos do relatório; `blocked` nunca vira revisão, `partial` não tem botão de publicar |
+| Revezamento | Hook StopFailure, veredito do Codex em JSON estrito, notas de passagem para o Claude, limite diário de verificações |
+| Briefing vivo | `BRIEFING.md` lido primeiro pelo Codex; carimbos de tempo velhos, futuros ou ausentes e SHAs divergentes viram avisos |
+| Higiene do Git | clones descartáveis a partir de um espelho bare, só branches `agent/*`, sem force, tags ou remoções, log de auditoria só de acréscimo |
+| Publicação | aprovação humana sempre; daemon root com lista de repositórios do GitHub, pedidos de merge assinados com HMAC e de uso único, deploys por lista exata |
+| Privacidade | mascaramento de segredos e dados pessoais em tudo que o modelo lê do transcript e da memória do Claude |
+| Chat | Telegram (botões, callbacks assinados de uso único), WhatsApp não oficial (opt-in) ou nenhum |
+| Visão ao vivo | log de eventos mascarado por tarefa, `aao watch`, abridor de tmux/terminal, painel lateral experimental do Claude Code |
+| Operação | `aao setup`, `aao doctor`, reinícios graciosos que retomam o trabalho interrompido uma vez, histórico do chat para o Claude |
 
 ## Modos de permissão
 
@@ -532,6 +547,91 @@ botões de aprovação. Referências a caminhos e permissões personalizadas pre
 reinício. Aprovações fixam SHA, repositório e destino; Git de entrega usa configuração privada. Hooks levam somente
 ids e estados; relatórios consultados são dados não confiáveis. Detalhes em [SECURITY.md](SECURITY.md).
 
+## Comandos do Telegram
+
+Os comandos ficam registrados no menu do bot. Os apelidos em português da origem do projeto também funcionam
+(`/tarefa`, `/quadro`, `/pausar`...).
+
+| Comando | O que faz |
+| --- | --- |
+| *texto livre* | conversa com o Codex; edita código num branch `agent/chat-*` quando o repositório é conhecido |
+| `/task [repo] <texto>` | tarefa formal para o Codex (confirmar / editar / cancelar) |
+| `/board` | tarefas abertas com Ver / Atribuir ao Codex / Atribuir ao Claude / Cancelar |
+| `/status` | motor, modelo, esforço, fila, estado do Claude, idade do briefing |
+| `/usage` | janelas de uso do plano informadas pelo Codex, mais os contadores locais |
+| `/model`, `/effort [nível]` | escolhe modelo e esforço de raciocínio do Codex |
+| `/engine` | codex, claude (headless) ou auto |
+| `/repos`, `/repo <nome>` | repositórios permitidos / repositório padrão |
+| `/context` | o Codex confere agora o briefing e o fim do transcript |
+| `/pause`, `/resume`, `/cancel` | controlam a fila |
+| `/last`, `/diff`, `/branches` | último resultado, resumo do diff, branches de agentes |
+| `/new` | encerra a sessão de chat; a próxima mensagem abre um novo branch |
+| `/auto` | continuação automática no limite do Claude, liga/desliga |
+| `/cap [n]` | limite diário de verificações de limite do Codex |
+| `/limit` | última evidência de limite de uso do Claude |
+| `/logs`, `/history [N]` | últimas linhas do log (mascaradas) e histórico do chat |
+| `/help` | esta lista |
+
+## Referência do CLI
+
+Todo comando é `aao <comando>` (também instalado como `ai-agents-orchestrator`). Os nomes de comandos e flags em português (por exemplo `--titulo`) continuam só como apelidos de **compatibilidade**; esta referência e a documentação usam os nomes em inglês.
+Use `aao --config CAMINHO <comando>` para escolher uma configuração explicitamente.
+
+| Comando | Para que serve |
+| --- | --- |
+| `setup`, `doctor [--json] [--fix]` | configura; verifica e, se pedido, cria pastas e regras de exemplo que faltam |
+| `serve [--dry-run] [--no-chat]` | executa o serviço |
+| `stop` | encerra com elegância o processo de usuário do modo leve |
+| `service install --windows`, `service uninstall --windows` | gerencia a inicialização no logon do Windows, só do usuário atual |
+| `root-daemon` | executa o daemon privilegiado opcional |
+| `delegate --repo R --title T [--files a,b] [--briefing ARQ \| --briefing-text TXT] [--description D] [--priority N]` | enfileira uma tarefa para o Codex |
+| `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID [--short\|--full]`, `cancel ID`, `claim ID [--owner] [--files]` | quadro; `list` aceita `review`/`running` e devolve rótulos de estado em inglês; `result` é curto por padrão |
+| `wait ID [--timeout S]` | bloqueia até um estado final (saída 0 revisão/concluída, 1 bloqueada/cancelada, 2 tempo esgotado) |
+| `review --repo R --branch B` | revisão cruzada pelo Codex (somente leitura) |
+| `publish ID` | aprovação humana interativa; leve: o usuário normal digita o ID e o SHA completo; completo: o root digita o ID de uma tarefa delegada pelo Claude |
+| `watch [ID] [--no-follow]`, `watch-open [ID]` | visão ao vivo |
+| `status [--brief]`, `pause`, `resume` | estado do serviço, agenda durável de retomada e fila |
+| `arm`, `disarm` | passagem automática no limite de uso do Claude |
+| `claude-limit`, `claude-usage`, `hook-prompt [--event E]`, `claude-resumed`, `note` | cola dos hooks do Claude Code, contadores de tokens e notas |
+| `briefing-status`, `briefing-check` | briefing vivo |
+| `history [--last N] [--since AAAA-MM-DD] [--search TEXTO]` | histórico do canal de chat |
+| `mirror [--no-repos]` | atualiza o espelho agora |
+| `check-rules [--file F]` | verifica as regras-base (revisão vencida só avisa) |
+| `install [--source DIR] [--dest DIR]` | instalação de dono root a partir de um checkout git revisado (configurações que se auto-editam) |
+
+## Configuração
+
+Um único arquivo TOML, documentado em [`examples/config.example.toml`](examples/config.example.toml). Toda chave pode ser
+sobrescrita por `AAO_<SEÇÃO>_<CHAVE>` (por exemplo `AAO_SERVICE_TASKS_PER_HOUR=3`); os segredos vêm do ambiente
+(`AAO_TELEGRAM_TOKEN`, `AAO_PUBLISH_KEY`). Os repositórios são tabelas `[repos.<nome>]` (ou um arquivo JSON, veja
+[`examples/repos.example.json`](examples/repos.example.json)) com `github`, `base_branch`, uma `source` local opcional
+e `local = true` para repositórios sem remoto. Os comandos de deploy ficam numa lista de permissão só do root,
+[`examples/publish.example.json`](examples/publish.example.json).
+
+Modo leve: `[lite] transcripts_project` (ou `AAO_LITE_TRANSCRIPTS_PROJECT`) indica a pasta do projeto cujos transcripts
+do Claude Code o espelho lê. Sem ele, usa-se a pasta onde `aao serve` roda. `aao setup` pergunta e `aao doctor` confere.
+
+## FAQ
+
+**Precisa de chaves de API?** Não. Roda os CLIs `codex` e `claude` com os logins que você já tem; o uso conta nesses
+planos.
+
+**Os termos dos provedores permitem?** Ele só automatiza os CLIs oficiais na sua máquina, no seu trabalho. Confira você
+mesmo os termos do seu plano sobre automação e concorrência; o canal WhatsApp é um risco separado e explícito.
+
+**O que a OpenAI recebe?** Os prompts das tarefas, os repositórios em que o Codex trabalha e, se você rodar `aao arm`,
+o fim mascarado do transcript e dos arquivos de memória do Claude Code. O mascaramento é por padrões.
+
+**O Codex pode dar push na main?** O orquestrador exige aprovação humana antes de integrar um branch de agente na base de
+um repositório da lista. O modo completo usa o daemon root; o leve usa o comando interativo de publicação do usuário.
+O modo leve não consegue impor isso contra código malicioso que compartilhe o seu uid e as suas credenciais Git.
+
+**Preciso do daemon root?** Só no modo completo, onde ele atualiza espelhos e publica com credenciais separadas. O modo
+leve sincroniza sob demanda e publica, com aprovação humana, como o seu usuário normal.
+
+**Por que alguns identificadores estão em português?** O projeto nasceu como ferramenta interna no Brasil. O texto voltado
+ao usuário é em inglês; veja o [glossário](#glossário).
+
 ## Decisões de projeto
 
 - **Dois motores, um time.** O Claude planeja, conversa e revisa; o Codex implementa e faz revisão cruzada. Dividir o
@@ -556,16 +656,27 @@ ids e estados; relatórios consultados são dados não confiáveis. Detalhes em 
 - **WhatsApp é opcional e não oficial.** Existe como substituto completo do Telegram, por conta e risco do usuário, depois
   de digitar uma aceitação explícita no assistente.
 
-## Limitações e roteiro
+## Limitações
 
-Limitações: modo completo exige Linux/systemd; modo leve suporta Linux/macOS/Windows nativo, com CI da plataforma obrigatória antes do lançamento;
-formato da mensagem de limite do Codex não é documentado; mascaramento por padrões; acordar
-o Claude e o painel dependem de interfaces não documentadas/em acesso antecipado; o canal WhatsApp foi testado só com
-dublês, não com uma conta real; um dono por instalação.
+- O modo completo exige Linux/systemd. O leve suporta Linux, macOS e Windows nativo sem systemd; veja o suporte por sistema e a CI de lançamento acima.
+- O formato da mensagem de limite de uso do Codex não é documentado; a detecção é tolerante, mas pode perder textos novos.
+- A detecção interativa inicial de limite precisa do hook StopFailure ou de `/context`; depois de registrada, o agendamento da retomada e o desenvolvimento
+  enfileirado continuam sem sessão do Claude aberta. Horários de reinício desconhecidos exigem um login headless do Claude
+  para as sondas; sem ele, o Codex continua e a disponibilidade do Claude espera nova evidência.
+- O mascaramento de segredos é por expressões regulares; segredos em formatos incomuns podem escapar.
+- O acordar experimental do Claude Code e o painel `/codex-pane` dependem de interfaces não documentadas ou em acesso antecipado.
+- O canal WhatsApp foi testado só com dublês, não com uma conta real; o pareamento e a reconexão dependem da biblioteca de terceiros.
+- Um dono por instalação; sem papéis para vários usuários.
 
-Roteiro: canal oficial **WhatsApp Business Cloud API** (Meta), em Python, atrás da mesma interface (exige webhook HTTPS
-público e um app empresarial da Meta; limitações: preço por conversa e a janela de 24 h de atendimento); outros canais
-(Slack, Matrix, e-mail); identificadores internos em inglês com migração; imagem de contêiner.
+## Roteiro
+
+- Canal oficial **WhatsApp Business Cloud API** (Meta), em Python, atrás da mesma interface de canal. Exige um webhook
+  HTTPS público e um app empresarial da Meta; limitações a documentar: preço por conversa e a janela de 24 horas de
+  atendimento para respostas livres.
+- Mais canais (Slack, Matrix, e-mail) pela interface de canal.
+- Identificadores internos em inglês, com migração dos bancos existentes.
+- Imagem de contêiner e exemplos de serviço sem systemd.
+- Filtros mais ricos no `aao watch` e um painel web.
 
 ## Glossário
 
