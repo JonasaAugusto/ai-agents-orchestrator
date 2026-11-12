@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-12
+
 ### Added
 - `release.yml`: tag, build, GitHub Release and PyPI Trusted Publishing (off until `PUBLISH_TO_PYPI=true` and the PyPI project exists).
 - `publish.push_url_scheme = "ssh"` uses `git@github.com:owner/repo.git` in lite; credential failures say what to configure.

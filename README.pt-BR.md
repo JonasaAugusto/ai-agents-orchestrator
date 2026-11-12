@@ -24,7 +24,7 @@ este arquivo resume o essencial em português. Seções só em inglês: [Feature
 Comece pelo [Início rápido](#início-rápido-modo-leve-121) logo abaixo ou pelos [Primeiros 10 minutos](docs/first-10-minutes.md), com saída capturada sem credenciais.
 Veja também [contribuição](CONTRIBUTING.md), [conduta](CODE_OF_CONDUCT.md) e [segurança](SECURITY.md).
 
-## Início rápido: modo leve (1.2.1)
+## Início rápido: modo leve (1.3.0)
 
 No Linux, macOS ou Windows, com Python 3.11+, Git 2.38+, Codex CLI e Claude Code instalados,
 execute como seu usuário normal:
