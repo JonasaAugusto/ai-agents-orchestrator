@@ -107,7 +107,6 @@ class WindowsProcesses(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][-4:], ["/PID", "123", "/T", "/F"])
 
     def test_subprocess_utf8_and_crlf(self):
-        from ai_agents_orchestrator import compat
         ctl = engines._Proc()
         code, lines, err, timeout = engines._rodar(
             [sys.executable, "-c", "import sys; sys.stdout.buffer.write('ação\\r\\n'.encode('utf-8'))"],
@@ -198,7 +197,9 @@ class NativeWindows(unittest.TestCase):
             dacl = result.stdout.strip().split("D:", 1)[1]
             self.assertTrue(dacl.startswith("P"), dacl)
             self.assertEqual(dacl.count("("), 1, dacl)
-            self.assertIn(compat.windows_sid(), dacl)
+            sid = compat.windows_sid()
+            # A conta Administrador interna (RID 500) aparece na SDDL pelo apelido "LA", não pelo SID.
+            self.assertTrue(sid in dacl or (sid.endswith("-500") and ";;;LA)" in dacl), dacl)
 
     def test_job_close_terminates_real_child_tree(self):
         from ai_agents_orchestrator import compat

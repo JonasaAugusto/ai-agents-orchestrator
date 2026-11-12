@@ -16,7 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # A suíte completa exige o modo completo (root, systemd, /proc): é Linux. macOS e Windows rodam o modo leve (job `lite`).
+        os: [ubuntu-latest]
         python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -61,7 +62,7 @@ jobs:
       - name: Install with pipx
         run: |
           python -m pip install pipx
-          python -m pipx install --python "$(command -v python)" .
+          python -m pipx install --python "$(python -c 'import sys; print(sys.executable)')" .
           BIN="$(python -m pipx environment --value PIPX_BIN_DIR)"
           "$BIN/aao" --version
       - name: Test clean installed CLI without provider credentials

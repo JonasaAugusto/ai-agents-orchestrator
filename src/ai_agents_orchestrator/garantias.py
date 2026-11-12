@@ -6,7 +6,6 @@ not stale descriptions of the environment.
 """
 from __future__ import annotations
 
-import os
 import getpass
 from . import compat
 import re

@@ -1,7 +1,6 @@
 """Claude Code plugin shipped in claude-plugin/: manifest, skill, hooks and commands stay consistent with the CLI."""
 import json
 import re
-import shlex
 import unittest
 from pathlib import Path
 
