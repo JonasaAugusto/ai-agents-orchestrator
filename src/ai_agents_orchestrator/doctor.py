@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, engines, gitseguro
+from . import compat, config, engines, gitseguro
 from .config import CLI, Config
 
 OK, AVISO, FALHA, INFO = "ok", "warn", "FAIL", "info"
@@ -37,11 +37,11 @@ class Ambiente:
     """Real probes. Tests replace the methods."""
 
     def which(self, prog: str) -> str | None:
-        return shutil.which(prog)
+        return compat.which(prog)
 
     def rodar(self, cmd: list[str], env: dict | None = None, timeout: int = 30) -> tuple[int, str]:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+            r = subprocess.run(compat.command(cmd, env), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env)
             return r.returncode, (r.stdout + r.stderr)
         except FileNotFoundError:
             return 127, "not found"
@@ -56,8 +56,8 @@ class Ambiente:
         except KeyError:
             return False
 
-    def euid(self) -> int:
-        return os.geteuid()
+    def euid(self) -> int | None:
+        return compat.euid()
 
     def stat(self, p: Path):
         try:
@@ -115,6 +115,8 @@ def _hooks_presentes(d: dict) -> set[str]:
                 if not isinstance(h, dict) or h.get("type") != "command":
                     continue
                 cmd = h.get("command", "")
+                if cmd == "aao" and isinstance(h.get("args"), list) and all(isinstance(x, str) for x in h["args"]):
+                    cmd = " ".join([cmd, *h["args"]])
                 if isinstance(cmd, str) and (cmd == comando or cmd.startswith(comando + " ")):
                     achados.add(evento)
     return achados
@@ -257,11 +259,11 @@ def checar_repos(cfg: Config, amb: Ambiente) -> list[Item]:
     for nome, spec in cfg.repos.items():
         gh = spec.get("github")
         if gh:
-            code, out = amb.rodar(["git", "-C", "/", *gitseguro.CONFIAVEL, "ls-remote", "--exit-code", f"https://github.com/{gh}.git", "HEAD"],
-                                  env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/root"),
-                                       "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_SYSTEM": "/dev/null",
+            code, out = amb.rodar(["git", "-C", Path.cwd().anchor, *gitseguro.CONFIAVEL, "ls-remote", "--exit-code", f"https://github.com/{gh}.git", "HEAD"],
+                                  env={**compat.windows_env(), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/root"),
+                                       "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_SYSTEM": os.devnull,
                                        "GIT_CONFIG_GLOBAL": str(Path.home() / ".gitconfig") if cfg.mode == "lite" else
-                                       ("/root/.gitconfig" if amb.euid() == 0 else "/dev/null")}, timeout=60)
+                                       ("/root/.gitconfig" if amb.euid() == 0 else os.devnull)}, timeout=60)
             if code == 0:
                 extra = "" if gh in cfg.push_allowlist else " (not in publish.push_allowlist: the agent cannot push it)"
                 itens.append(Item(f"repo {nome}", OK if not extra else AVISO, f"github {gh} reachable{extra}"))
@@ -281,10 +283,18 @@ def checar_repos(cfg: Config, amb: Ambiente) -> list[Item]:
 
 def checar_base(cfg: Config, amb: Ambiente) -> list[Item]:
     itens = []
-    if amb.stat(config.CONFIG_FILE) is None:
-        itens.append(Item("config file", AVISO, f"{config.CONFIG_FILE} not found (defaults in use)", f"Run `{CLI} setup`."))
+    config_file = config.default_config_file()
+    if amb.stat(config_file) is None:
+        itens.append(Item("config file", AVISO, f"{config_file} not found (defaults in use)", f"Run `{CLI} setup`."))
     else:
-        itens.append(Item("config file", OK, str(config.CONFIG_FILE)))
+        itens.append(Item("config file", OK, str(config_file)))
+    if compat.WINDOWS:
+        itens.append(Item("Windows runtime", OK if cfg.mode == "lite" else FALHA,
+                          "native lite, UTF-8, loopback TCP with user-only token ACL; no root daemon/systemd"))
+        itens.append(Item("Windows Codex sandbox", AVISO,
+                          "Sandbox support depends on the installed Codex CLI; AAO does not validate its isolation",
+                          "Use WSL2 for a Linux sandbox; install aao, git, codex and claude together inside WSL2. Never disable the sandbox to fix compatibility."))
+        itens.append(Item("Windows paths", INFO, "Git workspaces use core.longpaths=true and autocrlf=false; prefer a short state directory for third-party tools."))
     if cfg.mode == "lite":
         itens.append(Item("runtime mode", AVISO, "lite: current user, no systemd; no isolation from engines and no Publish button",
                           "Review results, then use aao publish <id> at a terminal and confirm the full SHA."))
@@ -349,7 +359,11 @@ def checar_runtime(cfg: Config, amb: Ambiente) -> list[Item]:
     if cfg.mode == "full":
         sockets.append(("root daemon socket", cfg.root_socket))
     for nome, caminho in sockets:
-        ativo = amb.socket_ativo(caminho)
+        if cfg.use_tcp and nome == "service socket":
+            from .cli import chamar
+            ativo = bool(chamar(cfg, {"cmd": "status"}, timeout=2).get("ok"))
+        else:
+            ativo = amb.socket_ativo(caminho)
         fix = ("Run aao serve and check paths.socket." if cfg.mode == "lite" else
                "Ask the operator to check aao serve / aao root-daemon and their configured sockets.")
         itens.append(Item(nome, OK if ativo else FALHA, "accepting connections" if ativo else "not accepting connections",
@@ -396,11 +410,13 @@ def checar_medicao(cfg: Config, amb: Ambiente | None = None, settings: list[Path
 def corrigir_triviais(cfg: Config) -> list[Item]:
     """Only missing directories and example rules; never credentials, services or existing files."""
     itens = []
-    import pwd
-    try:
-        uid = pwd.getpwnam(cfg.service_user).pw_uid if os.geteuid() == 0 and cfg.mode == "full" else None
-    except KeyError:
-        uid = None
+    uid = None
+    if cfg.mode == "full" and not compat.WINDOWS:
+        import pwd
+        try:
+            uid = pwd.getpwnam(cfg.service_user).pw_uid if compat.euid() == 0 else None
+        except KeyError:
+            pass
 
     def criar_diretorios(path: Path, modo: int, dono: int | None = None) -> None:
         faltam = []
@@ -434,7 +450,10 @@ def corrigir_triviais(cfg: Config) -> list[Item]:
                 raise FileNotFoundError("example rules not installed")
             criar_diretorios(destino.parent, 0o755)
             with destino.open("x", encoding="utf-8") as f:
-                os.fchmod(f.fileno(), 0o644)
+                if hasattr(os, "fchmod"):
+                    os.fchmod(f.fileno(), 0o644)
+                else:
+                    os.chmod(destino, 0o644)
                 f.write(origem.read_text(encoding="utf-8"))
             itens.append(Item("fix rules", INFO, f"created example {destino}; adapt it to your team"))
         except FileExistsError:

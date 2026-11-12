@@ -5,36 +5,33 @@ Only the interactive publish CLI constructs a backend that permits base pushes.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
 import subprocess
 import tempfile
-from contextlib import contextmanager
 from pathlib import Path
 
-from . import engines, espelho, gitseguro, sanitize, workspace
+from . import compat, engines, espelho, gitseguro, sanitize, workspace
 from .config import Config
 
 
 def serve(cfg: Config, dry_run: bool = False) -> int:
     from .cli import montar_servico
-    if os.geteuid() == 0:
+    if compat.euid() == 0:
         print("lite: run aao serve as your normal user, without sudo")
         return 2
     cfg.state_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
-    fd = os.open(cfg.state_dir / "serve.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    compat.private(cfg.state_dir)
     svc = None
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print("lite: aao serve is already running")
-            return 2
-        svc = montar_servico(cfg, dry_run, True)
-        svc.rodar()
+        with compat.file_lock(cfg.state_dir / "serve.lock", blocking=False):
+            svc = montar_servico(cfg, dry_run, True)
+            svc.rodar()
         return 0
+    except BlockingIOError:
+        print("lite: aao serve is already running")
+        return 2
     except OSError as e:
         print(f"lite: {e}")
         return 1
@@ -42,29 +39,21 @@ def serve(cfg: Config, dry_run: bool = False) -> int:
         if svc:
             svc.estado.c.close()
             svc.quadro.c.close()
-        os.close(fd)
 
 
 def write_private(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     fd, name = tempfile.mkstemp(dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            compat.private(Path(name))
             stream.write(text)
         os.replace(name, path)
     finally:
         Path(name).unlink(missing_ok=True)
 
 
-@contextmanager
-def lock(path: Path):
-    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        os.close(fd)
+lock = compat.file_lock
 
 
 class LocalBackend:

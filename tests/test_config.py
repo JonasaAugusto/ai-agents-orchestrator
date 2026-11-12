@@ -43,6 +43,7 @@ class Padroes(unittest.TestCase):
         self.assertEqual(cap["rede"], "yes")
 
 
+@unittest.skipIf(os.name == "nt", "legacy full-mode TOML/channel examples; native lite config is covered in test_windows")
 class Carregar(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

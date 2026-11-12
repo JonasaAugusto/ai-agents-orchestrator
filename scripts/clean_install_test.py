@@ -79,7 +79,8 @@ def validate_plugin(root: Path) -> None:
             if not group.get("hooks"):
                 raise ValueError("empty hook group")
             for hook in group["hooks"]:
-                argv = shlex.split(hook.get("command", ""))
+                # Forma com `args` (sem shell, serve também no Windows) ou comando único com argumentos.
+                argv = shlex.split(hook.get("command", "")) + [str(a) for a in hook.get("args", [])]
                 if hook.get("type") != "command" or not argv or argv[0] != "aao" or not 0 < hook.get("timeout", 0) <= 30:
                     raise ValueError("invalid hook command/type/timeout")
                 try:

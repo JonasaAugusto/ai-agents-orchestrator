@@ -1,3 +1,8 @@
+import sys
+import unittest
+if sys.platform == "win32":
+    raise unittest.SkipTest('privileged Linux mirror: root-owned directories and POSIX descriptor APIs')
+
 import tempfile
 import unittest
 from pathlib import Path

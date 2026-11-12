@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import queue
 import selectors
 import signal
 import subprocess
@@ -15,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import config
+from . import compat, config
 from .medicao import contadores
 
 # ------------------------------------------------------------------ limit detection
@@ -145,6 +146,9 @@ def env_filhos(state_dir: Path, extras: dict[str, str] | None = None) -> dict[st
     """MINIMAL environment for the engines: no Telegram token, no HMAC key."""
     e = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(state_dir), "CODEX_HOME": str(state_dir / ".codex"),
          "LANG": "C.UTF-8", "TERM": "dumb", "NO_COLOR": "1", "GIT_TERMINAL_PROMPT": "0"}
+    e.update(compat.windows_env())
+    if compat.WINDOWS:
+        e["PATH"] = os.environ.get("PATH", os.defpath)
     if extras:
         e.update(extras)
     return e
@@ -153,6 +157,8 @@ def env_filhos(state_dir: Path, extras: dict[str, str] | None = None) -> dict[st
 def env_usuario() -> dict[str, str]:
     """Lite engines use the caller's CLI installs and official login, never service secrets."""
     e = env_filhos(Path.home())
+    e.update(compat.windows_env())
+    e.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     for key in ("PATH", "HOME", "CODEX_HOME", "SSH_AUTH_SOCK", "TMPDIR"):
         if os.environ.get(key):
             e[key] = os.environ[key]
@@ -165,11 +171,23 @@ class _Proc:
     def __init__(self):
         self.p: subprocess.Popen | None = None
         self.cancel = threading.Event()
+        self._termination_lock = threading.Lock()
+        self._terminating = False
+        self.job = None
 
     def terminar(self, grace: float = 15.0) -> None:
         self.cancel.set()
         p = self.p
         if p and p.poll() is None:
+            if compat.WINDOWS:
+                with self._termination_lock:
+                    if not self._terminating:
+                        self._terminating = True
+                        if self.job:
+                            self.job.close()
+                        else:
+                            compat.kill_tree(p.pid)
+                return
             try:
                 os.killpg(p.pid, signal.SIGTERM)
             except (ProcessLookupError, PermissionError):
@@ -186,8 +204,10 @@ class _Proc:
 
 def _rodar(cmd: list[str], stdin: str, cwd: str | None, env: dict, timeout: float, ctl: _Proc,
            on_line=None, *, relogio=time.monotonic, esperar=time.sleep) -> tuple[int | None, list[str], str, bool]:
-    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, env=env,
-                         text=True, start_new_session=True, bufsize=1)
+    p = subprocess.Popen(compat.command(cmd, env), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         cwd=cwd, env=env, text=True, encoding="utf-8", errors="replace", bufsize=1, **compat.process_group())
+    job = compat.ProcessJob(p)
+    ctl.job = job
     ctl.p = p
     linhas: list[str] = []
     err: list[str] = []
@@ -223,7 +243,12 @@ def _rodar(cmd: list[str], stdin: str, cwd: str | None, env: dict, timeout: floa
             estourou = True
             ctl.terminar(grace=10)
         esperar(0.2)
+    job.close()
     t1.join(5); t2.join(5)
+    if not t1.is_alive():
+        p.stdout.close()
+    if not t2.is_alive():
+        p.stderr.close()
     return p.returncode, linhas, "".join(err), estourou
 
 
@@ -241,7 +266,8 @@ def status_login_codex(state_dir: Path, binario: str = "codex", runner=None, chi
     """{"instalado": bool, "logado": bool, "detalhe": str}. Runs `codex login status` with the service HOME/CODEX_HOME.
     The output is masked and truncated; it is never expected to contain secrets."""
     from . import sanitize
-    rodar = runner or (lambda cmd, env: subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env))
+    rodar = runner or (lambda cmd, env: subprocess.run(compat.command(cmd, env), capture_output=True, text=True,
+                                                     encoding="utf-8", errors="replace", timeout=30, env=env))
     try:
         r = rodar([binario, "login", "status"], child_env if child_env is not None else env_filhos(Path(state_dir)))
     except FileNotFoundError:
@@ -316,7 +342,7 @@ class CodexRunner:
             schema_path = None
             if schema:
                 schema_path = str(Path(tmp) / "schema.json")
-                Path(schema_path).write_text(json.dumps(schema))
+                Path(schema_path).write_text(json.dumps(schema), encoding="utf-8")
             cmd = self.comando(str(cwd), sandbox, saida, modelo, schema_path, resume, add_dirs, esforco)
             ctl = _Proc()
             self.atual = ctl
@@ -398,8 +424,8 @@ class ClaudeRunner:
     def disponivel(self) -> bool:
         if self.user_login:
             try:
-                return subprocess.run([self.bin, "auth", "status"], env=self.child_env, capture_output=True,
-                                      text=True, timeout=30).returncode == 0
+                return subprocess.run(compat.command([self.bin, "auth", "status"], self.child_env), env=self.child_env,
+                                      capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30).returncode == 0
             except (OSError, subprocess.TimeoutExpired):
                 return False
         return (self.state_dir / ".claude" / ".credentials.json").exists()
@@ -475,23 +501,58 @@ def uso_codex(state_dir: Path, binario: str = "codex", timeout: float = 15.0, ch
             {"jsonrpc": "2.0", "method": "initialized"},
             {"jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read"}]
     try:
-        p = subprocess.Popen([binario, "app-server", "--stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, env=child_env if child_env is not None else env_filhos(state_dir), start_new_session=True)
+        env = child_env if child_env is not None else env_filhos(state_dir)
+        p = subprocess.Popen(compat.command([binario, "app-server", "--stdio"], env), stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, **compat.process_group())
     except OSError as e:
         return {"ok": False, "erro": type(e).__name__}
-    seletor = selectors.DefaultSelector()
+    seletor = None if compat.WINDOWS else selectors.DefaultSelector()
+    job = compat.ProcessJob(p)
+    chunks = queue.Queue(maxsize=32)
+    reader_done = threading.Event()
+    def read_pipe():
+        try:
+            while not reader_done.is_set():
+                block = p.stdout.read1(65536)
+                if not block:
+                    break
+                while not reader_done.is_set():
+                    try:
+                        chunks.put(block, timeout=0.1)
+                        break
+                    except queue.Full:
+                        pass
+        except (OSError, ValueError):
+            pass
+        finally:
+            reader_done.set()
+    reader = None
     try:
         for m in msgs:
             p.stdin.write((json.dumps(m) + "\n").encode())  # type: ignore[union-attr]
         p.stdin.flush()  # type: ignore[union-attr]
-        seletor.register(p.stdout, selectors.EVENT_READ)
+        if seletor:
+            seletor.register(p.stdout, selectors.EVENT_READ)
+        else:
+            reader = threading.Thread(target=read_pipe, daemon=True)
+            reader.start()
         fim = time.monotonic() + timeout
         buffer = b""
         while True:
             restante = fim - time.monotonic()
-            if restante <= 0 or not seletor.select(restante):
+            if restante <= 0:
                 break
-            bloco = os.read(p.stdout.fileno(), 65536)
+            if seletor:
+                if not seletor.select(restante):
+                    break
+                bloco = os.read(p.stdout.fileno(), 65536)
+            else:
+                try:
+                    bloco = chunks.get(timeout=min(restante, 0.1))
+                except queue.Empty:
+                    if reader_done.is_set():
+                        break
+                    continue
             if not bloco:
                 break
             buffer += bloco
@@ -511,19 +572,30 @@ def uso_codex(state_dir: Path, binario: str = "codex", timeout: float = 15.0, ch
     except OSError:
         return {"ok": False, "erro": "usage process unavailable"}
     finally:
-        seletor.close()
+        if seletor:
+            seletor.close()
+        reader_done.set()
         try:
-            os.killpg(p.pid, signal.SIGTERM)
+            if compat.WINDOWS:
+                job.close()
+            else:
+                os.killpg(p.pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             pass
         try:
             p.wait(timeout=1)
         except subprocess.TimeoutExpired:
             try:
-                os.killpg(p.pid, signal.SIGKILL)
+                if compat.WINDOWS:
+                    job.close()
+                else:
+                    os.killpg(p.pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
             p.wait(timeout=1)
+        if reader:
+            reader.join(2)
+        job.close()
         p.stdin.close()
         p.stdout.close()
 
@@ -541,8 +613,9 @@ def resumir_limites(r: dict) -> dict:
 def modelos_codex(state_dir: Path, binario: str = "codex") -> list[dict]:
     """Local catalog (`codex debug models`): models with visibility=list."""
     try:
-        r = subprocess.run([binario, "debug", "models"], capture_output=True, text=True, timeout=30,
-                           env=env_filhos(state_dir))
+        env = env_filhos(state_dir)
+        r = subprocess.run(compat.command([binario, "debug", "models"], env), capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=30, env=env)
         d = json.loads(r.stdout)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return []

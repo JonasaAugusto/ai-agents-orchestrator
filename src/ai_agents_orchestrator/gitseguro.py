@@ -17,30 +17,43 @@ No safe.directory wildcard is used anywhere: root never opts into trusting a rep
 from __future__ import annotations
 
 import os
-import pwd
+import shutil
 import subprocess
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-ENDURECIDO = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=",
+from . import compat
+if not compat.WINDOWS:
+    import pwd
+
+ENDURECIDO = ("-c", "core.fsmonitor=false", "-c", f"core.hooksPath={os.devnull}", "-c", "credential.helper=",
               "-c", "core.gitProxy=", "-c", "protocol.ext.allow=never", "-c", "protocol.git.allow=never",
               "-c", "protocol.ssh.allow=never", "-c", "protocol.http.allow=never", "-c", "protocol.https.allow=never",
               "-c", "protocol.file.allow=always", "-c", "core.sshCommand=false", "-c", "log.showSignature=false")
-CONFIAVEL = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "protocol.ext.allow=never")
+CONFIAVEL = ("-c", "core.fsmonitor=false", "-c", f"core.hooksPath={os.devnull}", "-c", "protocol.ext.allow=never")
+if compat.WINDOWS:
+    ENDURECIDO += ("-c", "core.longpaths=true", "-c", "core.autocrlf=false")
+    CONFIAVEL += ("-c", "core.longpaths=true", "-c", "core.autocrlf=false")
 
 
 def env_endurecido(base: dict | None = None) -> dict:
     e = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/nonexistent", "LC_ALL": "C.UTF-8", "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1"}
+    e.update(compat.windows_env())
+    if compat.WINDOWS:
+        e["PATH"] = os.environ.get("PATH", os.defpath)
     e.update(base or {})
     for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_SSH_COMMAND",
               "GIT_SSH", "GIT_PROXY_COMMAND", "GIT_EXEC_PATH", "GIT_ASKPASS", "SSH_ASKPASS"):
         e.pop(k, None)
-    e.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_SYSTEM="/dev/null", GIT_CONFIG_GLOBAL="/dev/null")
+    e.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_GLOBAL=os.devnull)
     return e
 
 
 def git_endurecido(args: list[str], cwd=None, env: dict | None = None, timeout: int = 300, **kw) -> subprocess.CompletedProcess:
+    if kw.get("text", True):
+        kw.setdefault("encoding", "utf-8")
+        kw.setdefault("errors", "replace")
     kw.setdefault("capture_output", "stdout" not in kw)
     return subprocess.run(["git", *ENDURECIDO, *args], cwd=cwd, env=env_endurecido(env), text=kw.pop("text", True),
                           timeout=timeout, **kw)
@@ -48,8 +61,11 @@ def git_endurecido(args: list[str], cwd=None, env: dict | None = None, timeout: 
 
 def git_confiavel(args: list[str], cwd=None, env: dict | None = None, timeout: int = 300) -> subprocess.CompletedProcess:
     e = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/root", "LC_ALL": "C.UTF-8", "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1"}
+    e.update(compat.windows_env())
+    if compat.WINDOWS:
+        e["PATH"] = os.environ.get("PATH", os.defpath)
     e.update(env or {})
-    return subprocess.run(["git", *CONFIAVEL, *args], cwd=cwd, env=e, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(["git", *CONFIAVEL, *args], cwd=cwd, env=e, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
 
 
 def dono(caminho) -> int | None:
@@ -62,7 +78,7 @@ def dono(caminho) -> int | None:
 def git_como_dono(caminho, args: list[str], timeout: int = 60, **kw) -> subprocess.CompletedProcess:
     """Runs `git -C caminho args` without ever letting root honour config written by another user."""
     uid = dono(caminho)
-    if os.geteuid() == 0 and uid not in (None, 0):
+    if compat.euid() == 0 and uid not in (None, 0):
         try:
             gid = pwd.getpwuid(uid).pw_gid
         except KeyError:
@@ -84,10 +100,16 @@ def repositorio_isolado(gitdir, worktree=None, remotes=None, escrever=False, tem
             # Config syntax is data; quote values, including paths with spaces or newlines.
             quoted = str(url).replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
             cfg += f'[remote "{name}"]\n url = "{quoted}"\n fetch = +refs/heads/*:refs/remotes/{name}/*\n'
-        (private/'config').write_text(cfg)
+        if compat.WINDOWS:
+            cfg += '[core]\n longpaths = true\n autocrlf = false\n'
+        (private/'config').write_text(cfg, encoding='utf-8')
         for name in ('objects', 'refs', 'logs', 'info'):
             if (original/name).is_dir():
-                (private/name).symlink_to(original/name, target_is_directory=True)
+                if compat.WINDOWS:
+                    # No symlink privilege/Developer Mode required. Never copy local config.
+                    shutil.copytree(original/name, private/name)
+                else:
+                    (private/name).symlink_to(original/name, target_is_directory=True)
         files = ('HEAD', 'index', 'packed-refs', 'shallow', 'FETCH_HEAD', 'ORIG_HEAD',
                  'MERGE_HEAD', 'MERGE_MSG', 'MERGE_MODE', 'AUTO_MERGE')
         before = {}
@@ -100,6 +122,10 @@ def repositorio_isolado(gitdir, worktree=None, remotes=None, escrever=False, tem
             yield private
         finally:
             if escrever:
+                if compat.WINDOWS:
+                    for name in ("objects", "refs", "logs", "info"):
+                        if (private/name).is_dir():
+                            _sync_store(private/name, original/name, append_only=name == "objects")
                 for name in files:
                     target = private/name
                     after = target.read_bytes() if target.is_file() else None
@@ -117,3 +143,38 @@ def repositorio_isolado(gitdir, worktree=None, remotes=None, escrever=False, tem
                         finally:
                             if os.path.lexists(tmp):
                                 os.unlink(tmp)
+
+
+def _sync_store(source, target, *, append_only=False):
+    """Copy generated refs/objects without replacing the gitdir or touching its config.
+
+    Pack files are immutable and often read-only on Windows. Keep existing objects;
+    replace mutable refs atomically and apply deletions without removing their parent.
+    """
+    target.mkdir(parents=True, exist_ok=True)
+    if not append_only:
+        for old in sorted(target.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            current = source / old.relative_to(target)
+            if old.is_file() and not current.is_file():
+                old.chmod(0o600)
+                old.unlink()
+            elif old.is_dir() and not current.is_dir():
+                old.rmdir()
+    for item in source.rglob("*"):
+        destination = target / item.relative_to(source)
+        if item.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+        elif not (append_only and destination.exists()):
+            data = item.read_bytes()
+            if destination.is_file() and destination.read_bytes() == data:
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            fd, temp = tempfile.mkstemp(dir=destination.parent)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(data)
+                if destination.exists():
+                    destination.chmod(0o600)
+                os.replace(temp, destination)
+            finally:
+                Path(temp).unlink(missing_ok=True)

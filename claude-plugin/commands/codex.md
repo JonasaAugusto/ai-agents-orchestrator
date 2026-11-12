@@ -1,8 +1,10 @@
 ---
 description: Open a live view of what Codex is doing on a task (default the running one)
 argument-hint: "[task id]"
-allowed-tools: Bash(aao watch-open:*), Bash(aao watch:*)
+allowed-tools: Bash(aao watch-open:*), Bash(aao watch:*), PowerShell(aao watch-open *), PowerShell(aao watch *)
 ---
+
+On native Windows, run the commands through the PowerShell tool; no bash syntax is required.
 
 Open the live Codex view for task $ARGUMENTS (empty = the task running now):
 

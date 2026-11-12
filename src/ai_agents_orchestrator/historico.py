@@ -43,7 +43,10 @@ class Historico:
                 self.caminho.parent.mkdir(parents=True, exist_ok=True)
                 fd = os.open(self.caminho, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o640)
                 try:
-                    os.fchmod(fd, 0o640)  # the service umask 0077 would remove group read
+                    if hasattr(os, "fchmod"):
+                        os.fchmod(fd, 0o640)  # the service umask 0077 would remove group read
+                    else:
+                        os.chmod(self.caminho, 0o640)
                     os.write(fd, linha)
                 finally:
                     os.close(fd)
@@ -64,7 +67,7 @@ class Historico:
         try:
             st = os.stat(self.caminho)
             os.chown(tmp, st.st_uid, st.st_gid)
-        except OSError:
+        except (OSError, AttributeError):
             pass
         os.chmod(tmp, 0o640)
         os.replace(tmp, self.caminho)

@@ -20,7 +20,11 @@ sh scripts/clean-install-test.sh --distribution dist/*.whl
 sh scripts/clean-install-test.sh --distribution dist/*.tar.gz
 ```
 
-The project is Python only and has no runtime dependencies (the WhatsApp extra is optional). The test suite needs
+On Windows PowerShell, create the venv with `python -m venv .venv`, then use
+`.venv\Scripts\python -m pip install -e .` and
+`.venv\Scripts\python -W ignore -m unittest discover -s tests -t .`.
+
+The project is Python only; Windows installs `tzdata` for IANA timezones (the WhatsApp extra is optional). The test suite needs
 `git` on PATH and never calls OpenAI, Anthropic, Telegram or WhatsApp: engines, chat channels and the root daemon are
 replaced by doubles in `ai_agents_orchestrator.testing` and in the tests.
 
@@ -66,3 +70,7 @@ specific fixture path (including history). It does not exclude test directories 
 Small, focused pull requests with a clear description and the test commands you ran. Use the PR template and read
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 Do not publish releases or tags from a contribution branch; maintainers review and the owner approves publication.
+CI covers lite on Linux/macOS/Windows, Python 3.11–3.14. Windows runs suite discovery
+with explicit skips for full Linux privilege fixtures, root ownership, /proc and Unix
+peer sockets. Native ACL, process-tree and PowerShell tests run only on Windows;
+portable TCP, queue, setup and Git workflows run on every lite platform.

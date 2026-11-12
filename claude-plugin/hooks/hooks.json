@@ -7,8 +7,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "aao claude-limit",
-            "timeout": 10
+            "command": "aao",
+            "timeout": 10,
+            "args": [
+              "claude-limit"
+            ]
           }
         ]
       }
@@ -18,8 +21,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "aao hook-prompt --event UserPromptSubmit",
-            "timeout": 10
+            "command": "aao",
+            "timeout": 10,
+            "args": [
+              "hook-prompt",
+              "--event",
+              "UserPromptSubmit"
+            ]
           }
         ]
       }
@@ -29,8 +37,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "aao hook-prompt --event SessionStart",
-            "timeout": 10
+            "command": "aao",
+            "timeout": 10,
+            "args": [
+              "hook-prompt",
+              "--event",
+              "SessionStart"
+            ]
           }
         ]
       }
@@ -40,8 +53,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "aao claude-usage",
-            "timeout": 5
+            "command": "aao",
+            "timeout": 5,
+            "args": [
+              "claude-usage"
+            ]
           }
         ]
       }

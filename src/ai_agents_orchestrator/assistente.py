@@ -18,7 +18,7 @@ import re
 import secrets
 from pathlib import Path
 
-from . import config, doctor
+from . import compat, config, doctor
 from .config import CLI
 
 AVISO_SEM_CANAL = doctor.AVISO_SEM_CANAL
@@ -63,13 +63,17 @@ def _gid(usuario: str) -> int | None:
 
 
 def gravar(caminho: Path, texto: str, modo: int, dono_root: bool = True, grupo: int | None = None) -> None:
+    if compat.WINDOWS:
+        from .lite import write_private
+        write_private(caminho, texto)
+        return
     caminho.parent.mkdir(parents=True, exist_ok=True)
     tmp = caminho.with_suffix(caminho.suffix + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, modo)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(texto)
     os.chmod(tmp, modo)
-    if dono_root and os.geteuid() == 0:
+    if dono_root and compat.euid() == 0:
         os.chown(tmp, 0, 0 if grupo is None else grupo)
     os.replace(tmp, caminho)
 
@@ -78,7 +82,7 @@ class Assistente:
     def __init__(self, entrada=input, saida=print, config_file: Path | None = None, env_file: Path | None = None,
                  parear=None, amb=None):
         self.entrada, self.saida = entrada, saida
-        self.config_file = config_file or config.CONFIG_FILE
+        self.config_file = config_file or config.default_config_file()
         self.env_file = env_file or config.ENV_FILE
         self.parear = parear  # callable(cfg_answers) for WhatsApp pairing; None = real neonize pairing
         self.amb = amb or doctor.Ambiente()
@@ -118,13 +122,13 @@ class Assistente:
                 doctor.corrigir_triviais(cfg)
             self.configurar_clis(cfg)
             return 0
-        s("ai-agents-orchestrator setup. Nothing secret is printed; secrets go to a root-only file (0600).\n")
+        s("ai-agents-orchestrator setup. Nothing secret is printed; lite uses current-user file permissions.\n")
         r: dict = {"repos": {}, "allowlist": []}
         r["mode"] = self.pergunta("Runtime mode? lite (current user, no systemd) / full (Linux root daemon)", "lite",
                                    lambda v: v in ("lite", "full"))
         lite = r["mode"] == "lite"
         if not lite and not sys.platform.startswith("linux"):
-            s("Full mode requires Linux and systemd. Choose lite on macOS.")
+            s("Full mode requires Linux and systemd. Choose lite on macOS or Windows.")
             return 2
         if not lite and not self.explicit_config:
             self.config_file = Path(f"/etc/{config.NOME}/config.toml")
@@ -134,7 +138,7 @@ class Assistente:
             r["user"] = getpass.getuser()
         else:
             r["user"] = self.pergunta("Service user (unprivileged, runs the service and Codex)", "aao")
-        state = str(Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / config.NOME) if lite else f"/var/lib/{config.NOME}"
+        state = str(compat.user_state_dir()) if lite else f"/var/lib/{config.NOME}"
         r["state_dir"] = self.pergunta("State directory", state)
         r["timezone"] = self.pergunta("Timezone (IANA name)", "UTC")
         r["claude_transcripts"] = self.pergunta("Claude Code project transcripts dir to mirror",

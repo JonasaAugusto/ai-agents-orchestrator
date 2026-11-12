@@ -1,3 +1,8 @@
+import sys
+import unittest
+if sys.platform == "win32":
+    raise unittest.SkipTest('full Linux service security: root-owned install and process uid')
+
 import io
 import json
 import os

@@ -40,8 +40,8 @@ Constraints: <task-specific limits; refer to AGENTS.<repo>.md for stable context
 Report: <=20 lines; status, changes, test commands/counts, red/green, restored mutation, gaps, For Claude, risks
 ```
 
-```bash
-aao delegate --repo web-app --title "Validate signup e-mails" --files "app/signup.py,tests/test_signup.py" --briefing /tmp/task.md
+```text
+aao delegate --repo web-app --title "Validate signup e-mails" --files "app/signup.py,tests/test_signup.py" --briefing "task.md"
 ```
 
 ## Wait, do not poll
@@ -126,3 +126,6 @@ a snapshot you can summarize here.
 `aao claim <id>`, `aao note`, `aao briefing-status`, `aao history --last 50` (chat channel history, useful when the
 user refers to something said on their phone). List states are already translated: pending, in progress, in review,
 completed, blocked, cancelled. Filters also accept `running`, `review` and the legacy Portuguese names.
+
+On native Windows use the PowerShell tool for `aao` commands and write the temporary briefing with Write.
+Use a quoted path under the user temp directory; do not use bash heredocs or `/tmp`.

@@ -22,4 +22,9 @@ Requires the `aao` CLI on PATH (see the Quickstart in the main README) and a run
 /plugin install ai-agents-orchestrator --marketplace JonasaAugusto/ai-agents-orchestrator
 ```
 
+On native Windows, `aao.exe` must be on PATH. Hooks use exec form (`command` + `args`),
+so no bash is required. Slash commands allow both Bash and PowerShell; use a recent
+Claude Code with its PowerShell tool enabled. Briefings are files written with Write,
+not shell heredocs. See the main README for native vs WSL2 and the lite trust boundary.
+
 MIT licensed.

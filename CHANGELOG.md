@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-12
+
+### Native Windows lite mode
+
+- User runtime on Windows with Python 3.11–3.14, LocalAppData paths, UTF-8 and
+  authenticated IPv4 loopback IPC. The per-process random token is stored with a
+  protected current-user-only DACL; no root, systemd, Unix socket or symlink privilege.
+- Portable file locks, CLI/npm/PowerShell shim detection, Windows process groups and
+  process-tree cancellation. Account usage reads stdio through a bounded reader on
+  Windows, where selectors cannot monitor pipes.
+- Isolated Git storage on Windows avoids symlinks and ignores repository executable
+  configuration; controlled Git operations use longpaths and deterministic LF checkout.
+- `aao service install --windows` registers a least-privilege current-user logon task;
+  `uninstall` removes it and `aao stop` gracefully stops the lite process. No password, admin elevation or system service.
+- Shell-free Claude hooks and PowerShell command permissions; bilingual OS support
+  table and native/WSL2 instructions. Windows CI covers 3.11–3.14, clean installation
+  and native API regressions. Platform CI must pass before release.
+
 ## [1.2.0] - 2026-11-12
 
 ### Lite installation and runtime

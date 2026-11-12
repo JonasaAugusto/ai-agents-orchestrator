@@ -7,6 +7,8 @@ not stale descriptions of the environment.
 from __future__ import annotations
 
 import os
+import getpass
+from . import compat
 import re
 import unicodedata
 from datetime import datetime
@@ -116,16 +118,16 @@ def capacidades(sandbox: str, modelo: str | None, esforco: str | None, motor: st
         rede = "yes" if rede_config else "no"
     else:
         rede = "yes"
-    return {"uid": os.geteuid(), "usuario": _usuario(), "sandbox": efetivo, "sandbox_configurado": sandbox, "rede": rede,
+    return {"uid": compat.euid(), "usuario": _usuario(), "sandbox": efetivo, "sandbox_configurado": sandbox, "rede": rede,
             "modelo": modelo or "Codex default", "esforco": esforco or "Codex default", "motor": motor}
 
 
 def _usuario() -> str:
     try:
         import pwd
-        return pwd.getpwuid(os.geteuid()).pw_name
+        return pwd.getpwuid(compat.euid()).pw_name
     except (KeyError, ImportError):
-        return "?"
+        return getpass.getuser()
 
 
 def montar_snapshot(cfg: Config, agora: float, *, sandbox: str, modelo: str | None, esforco: str | None, motor: str = "codex",

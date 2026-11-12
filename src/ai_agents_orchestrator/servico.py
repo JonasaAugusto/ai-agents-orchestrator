@@ -14,7 +14,7 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-from . import config, engines, garantias, medicao, prompts, sanitize, workspace
+from . import compat, config, engines, garantias, medicao, prompts, sanitize, workspace
 from .botoes import Botoes
 from .config import Config
 from .db import Estado, Quadro
@@ -83,7 +83,7 @@ def chave_botoes(cfg: Config) -> str:
     import secrets
     p = cfg.state_dir / "button.key"
     try:
-        return p.read_text().strip() or "x"
+        return p.read_text(encoding="utf-8").strip() or "x"
     except OSError:
         pass
     try:
@@ -151,6 +151,7 @@ class Servico:
         self._socket_slots = threading.BoundedSemaphore(32)
         self.socket_ready = threading.Event()
         self.socket_error: str | None = None
+        self._ipc_token = None
         self._recado_lock = threading.Lock()
         self.ring: deque = deque(maxlen=300)
         self._snaps: dict[int, dict] = {}  # snapshot of each running task (goes to the summary/HANDOFF)
@@ -1238,11 +1239,11 @@ class Servico:
         n = self.quadro.marcar_visto() if marcar_notas else 0
         arq = self.cfg.para_claude / "estado.json"
         try:
-            e = json.loads(arq.read_text())
+            e = json.loads(arq.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             e = {}
         e.update(lido=not self.quadro.recado_pendente(), lido_em=self.agora())
-        arq.write_text(json.dumps(e))
+        arq.write_text(json.dumps(e), encoding="utf-8")
         trabalhando = self.tarefa_atual
         self.notificar("Claude took over. " + (f"Codex keeps working on task #{trabalhando} until it ends; then it hands back the baton."
                                                if trabalhando else "Codex has no task in progress."))
@@ -1269,7 +1270,7 @@ class Servico:
         path = self.cfg.para_claude / "HANDOFF-PARA-CLAUDE.md"
         self.cfg.para_claude.mkdir(parents=True, exist_ok=True)
         path.write_text(texto + "\n", encoding="utf-8")
-        (self.cfg.para_claude / "estado.json").write_text(json.dumps({"gerado": self.agora(), "lido": not pend}))
+        (self.cfg.para_claude / "estado.json").write_text(json.dumps({"gerado": self.agora(), "lido": not pend}), encoding="utf-8")
         return path
 
     def recado_para_hook(self, limite: int = 3000) -> str:
@@ -1369,6 +1370,11 @@ class Servico:
     def comando(self, req: dict) -> dict:
         """Local protocol (CLI -> service)."""
         c = req.get("cmd")
+        if c == "stop":
+            if self.cfg.mode != "lite":
+                return {"ok": False, "erro": "full mode: ask the operator to stop the system service"}
+            self.parar_suave()
+            return {"ok": True, "stopping": True}
         if c == "esperar":
             return self.esperar_tarefa(int(req.get("id", 0)), float(req.get("timeout", 0)))
         if c == "delegar":
@@ -1502,9 +1508,10 @@ class Servico:
         try:
             with c:
                 c.settimeout(10)
-                uid = peer_uid(c)
-                if uid not in (0, os.getuid()):
-                    return
+                if not self.cfg.use_tcp:
+                    uid = peer_uid(c)
+                    if uid not in (0, os.getuid()):
+                        return
                 dados = b""
                 while not dados.endswith(b"\n") and len(dados) < 2_000_000:
                     p = c.recv(65536)
@@ -1515,7 +1522,13 @@ class Servico:
                     req = json.loads(dados.decode())
                     if not isinstance(req, dict):
                         raise ValueError("invalid request")
-                    resp = self.comando(req)
+                    import secrets
+                    token = req.pop("token", None)
+                    if self.cfg.use_tcp and (not isinstance(token, str) or not self._ipc_token or
+                                             not secrets.compare_digest(token, self._ipc_token)):
+                        resp = {"ok": False, "erro": "local authentication failed"}
+                    else:
+                        resp = self.comando(req)
                 except (ValueError, TypeError):
                     resp = {"ok": False, "erro": "invalid request"}
                 c.sendall((json.dumps(resp, ensure_ascii=False, default=str) + "\n").encode())
@@ -1534,6 +1547,8 @@ class Servico:
             self.socket_ready.set()
 
     def _run_socket(self) -> None:
+        if self.cfg.use_tcp:
+            return self._run_tcp()
         caminho = str(self.cfg.socket_path)
         Path(caminho).parent.mkdir(parents=True, exist_ok=True)
         tmp = caminho + ".tmp"
@@ -1556,6 +1571,35 @@ class Servico:
                     c.close()
                     continue
                 threading.Thread(target=self._atender_socket, args=(c,), daemon=True).start()
+
+    def _run_tcp(self) -> None:
+        import secrets
+        from .lite import write_private
+        self._ipc_token = secrets.token_hex(32)
+        path = self.cfg.socket_path
+        path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+            if compat.WINDOWS:
+                srv.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(8)
+            record = json.dumps({"host": "127.0.0.1", "port": srv.getsockname()[1], "token": self._ipc_token})
+            write_private(path, record)
+            try:
+                self.socket_ready.set()
+                srv.settimeout(0.5)
+                while not self.parar_ev.is_set():
+                    try:
+                        c, _ = srv.accept()
+                    except socket.timeout:
+                        continue
+                    if not self._socket_slots.acquire(blocking=False):
+                        c.close()
+                        continue
+                    threading.Thread(target=self._atender_socket, args=(c,), daemon=True).start()
+            finally:
+                path.unlink(missing_ok=True)
+                self._ipc_token = None
 
     def parar_suave(self, *_a) -> None:
         """SIGTERM: stop accepting new work; the running Codex finishes (see drenar)."""

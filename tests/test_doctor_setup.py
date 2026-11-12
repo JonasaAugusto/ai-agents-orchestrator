@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ai_agents_orchestrator import assistente, config, doctor, engines
+from ai_agents_orchestrator import assistente, compat, config, doctor, engines
 from ai_agents_orchestrator.config import Config
 from ai_agents_orchestrator.testing import CodexFalso
 from tests.helpers import Base
@@ -51,6 +51,7 @@ def estados(itens):
     return {i.nome: i.estado for i in itens}
 
 
+@unittest.skipIf(compat.WINDOWS, "full-mode doctor: Linux service user, root secret files and Unix sockets")
 class Doctor(unittest.TestCase):
     def setUp(self):
         self.cfg = Config(state_dir=Path("/var/lib/x"), channel="none",
@@ -135,7 +136,7 @@ class LoginOficial(unittest.TestCase):
         r = engines.status_login_codex(Path("/var/lib/x"), "codex", runner=rodar)
         self.assertTrue(r["logado"])
         self.assertEqual(visto["cmd"], ["codex", "login", "status"])
-        self.assertEqual(visto["env"]["CODEX_HOME"], "/var/lib/x/.codex")
+        self.assertEqual(visto["env"]["CODEX_HOME"], str(Path("/var/lib/x/.codex")))
 
     def test_nao_logado_e_nao_instalado(self):
         nao = lambda cmd, env: type("R", (), {"returncode": 1, "stdout": "Not logged in", "stderr": ""})()
@@ -160,6 +161,7 @@ class LoginExpirado(Base):
         self.assertIn("Queue paused", txt)
 
 
+@unittest.skipUnless(os.sys.platform.startswith("linux"), "full-mode setup requires Linux service users and systemd")
 class Setup(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

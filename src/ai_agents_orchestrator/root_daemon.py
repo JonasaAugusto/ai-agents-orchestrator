@@ -20,7 +20,9 @@ import hashlib
 import hmac
 import json
 import os
-import pwd
+import sys
+if sys.platform != "win32":
+    import pwd
 import re
 import socket
 import struct
