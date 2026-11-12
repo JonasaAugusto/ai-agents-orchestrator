@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from ai_agents_orchestrator import config
+from ai_agents_orchestrator import compat
 from ai_agents_orchestrator.db import Estado, Quadro
 from ai_agents_orchestrator.engines import Resultado
 from ai_agents_orchestrator.servico import Servico
@@ -18,9 +19,9 @@ CHAT = 424242
 
 
 def sh(*args, cwd=None):
-    env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("TMPDIR", "/tmp"), "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x.com",
+    env = {**compat.windows_env(), "PATH": os.environ["PATH"], "HOME": tempfile.gettempdir(), "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x.com",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x.com"}
-    return subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, check=True).stdout
+    return subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8", check=True).stdout
 
 
 class FakeTransport:
@@ -52,7 +53,11 @@ class _Sincrono:
 
 
 class Base(unittest.TestCase):
+    native_lite = False
+
     def setUp(self):
+        if compat.WINDOWS and not self.native_lite:
+            self.skipTest("full-mode fixture: Linux privileged daemon, Unix ownership and remote approval channel")
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.dir = Path(self.tmp.name)

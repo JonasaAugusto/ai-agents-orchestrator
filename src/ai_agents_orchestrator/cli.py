@@ -1,5 +1,5 @@
 """`aao` / `ai-agents-orchestrator` CLI: service, optional root daemon, setup/doctor and local commands for Claude Code
-(through a local Unix socket; no network port).
+(through a local Unix socket or authenticated loopback TCP).
 
 Portuguese subcommand names from the project's origins are accepted as aliases (e.g. `delegar` = `delegate`).
 """
@@ -8,14 +8,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import socket
 import sqlite3
 import sys
 import time
 from datetime import date
 from pathlib import Path
 
-from . import __version__, config, engines, espelho, historico, regras, root_daemon, workspace
+from . import __version__, compat, config, engines, espelho, historico, ipc, regras, workspace
+from . import root_daemon
 from .bot import Bot
 from .config import CLI
 from .db import Estado, Quadro
@@ -33,11 +33,10 @@ AVISO_SEM_CANAL = ("Without a chat channel you cannot send prompts to Codex from
 
 def chamar(cfg, req: dict, timeout: float | None = 30) -> dict:
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
-            c.settimeout(30 if timeout is None else timeout)
-            c.connect(str(cfg.socket_path))
+        connection, token = ipc.connect(cfg, 30 if timeout is None else timeout)
+        with connection as c:
             c.settimeout(timeout)
-            c.sendall((json.dumps(req) + "\n").encode())
+            c.sendall((json.dumps({**req, "token": token} if token else req) + "\n").encode())
             dados = b""
             while not dados.endswith(b"\n"):
                 p = c.recv(65536)
@@ -128,7 +127,7 @@ def _hook_prompt(cfg, evento: str) -> int:
     try:
         b = chamar(cfg, {"cmd": "briefing_status"}, timeout=3)
         idade = b.get("idade_min")
-        con = sqlite3.connect(f"file:{cfg.db_quadro}?mode=ro", uri=True, timeout=2)
+        con = sqlite3.connect(cfg.db_quadro.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
         trabalho = con.execute("SELECT count(*) FROM tarefas WHERE estado NOT IN ('concluida','cancelada')").fetchone()[0] > 0
         con.close()
         marca = cfg.state_dir / "lembrete-ts"
@@ -154,7 +153,7 @@ def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = 
         from .lite import lock
         with lock(cfg.state_dir / "publish-cli.lock"):
             return _publicar_lite(cfg, tid, root=root, interativo=interativo, entrada=entrada)
-    if os.geteuid() != 0:
+    if compat.euid() != 0:
         print("refused: must run as root")
         return 2
     if interativo is None:
@@ -255,7 +254,7 @@ def instalar(origem: Path, destino: Path, exigir_root: bool = True) -> int:
     import subprocess
     import tarfile
     import tempfile
-    if exigir_root and os.geteuid() != 0:
+    if exigir_root and compat.euid() != 0:
         print("install: root only (and after review)"); return 1
     from .gitseguro import git_como_dono
 
@@ -348,13 +347,18 @@ CANONICO = {"servir": "serve", "verificar-regras": "check-rules", "instalar": "i
 
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=CLI, description="Orchestrate Claude Code and OpenAI Codex CLI as a relay team.")
+    ap.add_argument("--config", type=Path, help="explicit user config file (also used by logon tasks)")
     ap.add_argument("--version", action="version", version=__version__)
     sp = ap.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
     s = _sub(sp, "serve", "servir", help="run the service (worker, chat channel, local socket)")
     s.add_argument("--dry-run", action="store_true", help="fake Codex/root daemon, no chat channel")
     s.add_argument("--no-chat", "--sem-telegram", dest="sem_canal", action="store_true", help="run without a chat channel")
+    _sub(sp, "stop", help="gracefully stop the lite user service (including a logon task)")
     _sub(sp, "root-daemon", help="run the optional privileged daemon (root only)")
     _sub(sp, "setup", help="interactive wizard: writes the config and the secrets env file")
+    service = _sub(sp, "service", help="manage the Windows user logon task")
+    service.add_argument("action", choices=["install", "uninstall"])
+    service.add_argument("--windows", action="store_true", required=True)
     d = _sub(sp, "doctor", help="check the installation and print fix instructions")
     d.add_argument("--json", action="store_true", help="machine-readable output")
     d.add_argument("--fix", action="store_true", help="create missing state directories and example rules; never restart services")
@@ -427,7 +431,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    if compat.WINDOWS:
+        for stream in (sys.stdin, sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
     a = parser().parse_args(argv)
+    if a.config:
+        os.environ["AAO_CONFIG"] = str(a.config.resolve())
     cmd = CANONICO.get(a.cmd, a.cmd)
     if cmd == "install":
         return instalar(Path(a.origem), Path(a.destino))
@@ -436,7 +446,14 @@ def main(argv=None) -> int:
     if cmd == "setup":
         from . import assistente
         return assistente.main()
-    cfg = _cfg()
+    try:
+        cfg = _cfg()
+    except ValueError as error:
+        print(f"Configuration error: {error}", file=sys.stderr)
+        return 2
+    if cmd == "service":
+        from . import windows_service
+        return windows_service.manage(cfg, a.action, config.default_config_file())
     if cmd == "doctor":
         from . import doctor
         return doctor.main(cfg, como_json=a.json, fix=a.fix)
@@ -509,11 +526,12 @@ def main(argv=None) -> int:
         if cmd == "arm":
             cfg.armado_flag.parent.mkdir(parents=True, exist_ok=True)
             cfg.armado_flag.touch()
-            import grp, pwd
-            try:
-                os.chown(cfg.armado_flag, pwd.getpwnam(cfg.service_user).pw_uid, grp.getgrnam(cfg.service_user).gr_gid)
-            except (KeyError, PermissionError):
-                pass
+            if cfg.mode == "full":
+                import grp, pwd
+                try:
+                    os.chown(cfg.armado_flag, pwd.getpwnam(cfg.service_user).pw_uid, grp.getgrnam(cfg.service_user).gr_gid)
+                except (KeyError, PermissionError):
+                    pass
         else:
             cfg.armado_flag.unlink(missing_ok=True)
         print("armed" if cfg.armado_flag.exists() else "disarmed")

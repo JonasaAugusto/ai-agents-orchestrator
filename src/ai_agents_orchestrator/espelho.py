@@ -11,12 +11,9 @@ Understanding the context and deciding what to do is Codex's job, not this modul
 """
 from __future__ import annotations
 
-import fcntl
 import glob
-import grp
 import json
 import os
-import pwd
 import re
 import shutil
 import subprocess
@@ -24,8 +21,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import arquivos_root, gitseguro, medicao, sanitize
+from . import compat, arquivos_root, gitseguro, medicao, sanitize
 from .config import Config
+
+if not compat.WINDOWS:
+    import fcntl
+    import grp
+    import pwd
 
 USUARIO = "aao"  # replaced by cfg.service_user (see _ids)
 TAIL_BYTES = 12 * 1024 * 1024

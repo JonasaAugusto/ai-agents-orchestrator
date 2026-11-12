@@ -16,12 +16,12 @@ deployed without your explicit approval.
 - **No API keys.** It drives the official `codex` and `claude` CLIs with your own logins.
 - **You choose the permissions.** Codex starts restricted (own sandbox, no network, throwaway clones). On your own machine you can give it the same permissions as Claude ([Permission modes](#permission-modes)). Either way, publishing needs a human.
 - **Honest results.** A task whose report says `partial` or `blocked` is never shown as done, whatever the exit code.
-- **Python standard library only.** One optional extra (WhatsApp). Tested on Python 3.11 and 3.12.
+- **Python with minimal dependencies.** Windows adds `tzdata` for IANA timezones; WhatsApp is an optional extra. CI covers Python 3.11–3.14.
 
 ## Contents
 
 [How it works](#how-it-works) · [Features](#features) · [Permission modes](#permission-modes) · [Security model](#security-model) · [Who orchestrates](#who-orchestrates) ·
-[Quickstart](#quickstart-lite-mode-120) · [Tutorial](#tutorial-your-first-task) · [Design decisions](#design-decisions) ·
+[Quickstart](#quickstart-lite-mode-121) · [Tutorial](#tutorial-your-first-task) · [Design decisions](#design-decisions) ·
 [Claude Code plugin](#claude-code-plugin) · [Cost and balancing](#cost-and-balancing) · [Watching Codex live](#watching-codex-live) · [Chat channels](#chat-channels) ·
 [Telegram commands](#telegram-commands) · [CLI reference](#cli-reference) · [Configuration](#configuration) ·
 [FAQ](#faq) · [Limitations](#limitations) · [Roadmap](#roadmap) · [Glossary](#glossary)
@@ -169,7 +169,7 @@ secrets out of reach, and keep the publish allowlist short.
 ## Security model
 
 These are full-mode defaults with restricted Codex permissions; [Permission modes](#permission-modes) explains
-how to relax them. Lite's different trust model is described in its [quickstart](#quickstart-lite-mode-120).
+how to relax them. Lite's different trust model is described in its [quickstart](#quickstart-lite-mode-121).
 
 | Default | Why |
 | --- | --- |
@@ -210,16 +210,31 @@ What is implemented today: the handoff behaviour above, the choice in `aao setup
 bundled Claude Code skill is written for Claude as coordinator, so with `codex` you drive the work from the CLI
 (lite) or chat channel (full, Telegram or WhatsApp) and use Claude Code for the tasks you send it.
 
-## Quickstart: lite mode (1.2.0)
+## OS support
 
-On Linux or macOS, with Python 3.11+, Git 2.38+, Codex CLI and Claude Code installed,
+| System | Lite (user process) | Full (privileged daemon + approval channel) |
+| --- | --- | --- |
+| Linux | Supported | Supported with root and systemd |
+| macOS | Supported | Linux only |
+| Windows native, Python 3.11–3.14 | Supported; PowerShell/cmd | Linux only |
+| Windows WSL2 | Linux lite inside WSL2 | Requires a Linux/systemd setup inside WSL2 |
+
+Windows/macOS CI must pass before a release is advertised as validated on those systems.
+The full-mode root daemon, protected privilege boundary and remote Publish button remain Linux-only.
+
+## Quickstart: lite mode (1.2.1)
+
+On Linux, macOS or Windows, with Python 3.11+, Git 2.38+, Codex CLI and Claude Code installed,
 run this **from the cloned repository**, as your normal user:
 
-```bash
-pipx install . && aao setup
-# Alternative:
-uv tool install . && aao setup
+```text
+pipx install .
+aao setup
 ```
+
+Or run `uv tool install .`, then `aao setup`. Each installer creates an isolated environment.
+On Linux/macOS the one-line equivalent is `pipx install . && aao setup`.
+On Windows PowerShell 5.1 or cmd, use the separate commands above (PowerShell 5.1 has no `&&`).
 
 The package is not on PyPI yet. Ensure pipx's or uv's tool bin directory is on PATH.
 Choose **lite** in the wizard, choose the coordinator (`claude` or `codex`), and register
@@ -261,9 +276,14 @@ The generated config has top-level `mode = "lite"`. It defaults to
 `~/.config/ai-agents-orchestrator/config.toml` (`XDG_CONFIG_HOME` supported); state
 defaults to `~/.local/state/ai-agents-orchestrator` (`XDG_STATE_HOME` supported).
 `AAO_CONFIG` selects an explicit config; an existing system config remains supported.
+On Windows, config defaults to `%LOCALAPPDATA%\ai-agents-orchestrator\config.toml`
+and state to `%LOCALAPPDATA%\ai-agents-orchestrator\state`.
 Lite uses your normal HOME, PATH and CODEX_HOME, including Homebrew/CLI install paths.
 The local socket lives in the state directory; `paths.socket` can shorten a long path.
-macOS uses peer credentials through `getpeereid`; Linux uses `SO_PEERCRED`. Mirrors
+macOS uses peer credentials through `getpeereid`; Linux uses `SO_PEERCRED`. Windows
+uses TCP bound only to `127.0.0.1`, with a new random token per service process in a
+current-user-only ACL endpoint file (never share it). `service.local_transport = "tcp"`
+selects this transport on POSIX too; CLI and hook commands stay the same. Mirrors
 are refreshed on demand; no inotify dependency is needed.
 
 **Lite does not isolate agents from your account, files or Git credentials.** A process
@@ -271,8 +291,58 @@ under your uid can alter state or simulate approval. Interactive confirmation is
 human workflow safeguard, not a security boundary against malicious same-user code.
 There is no Publish button or deployment runner. Full mode retains the privileged
 daemon, protected state and optional remote approval channel. `aao doctor` explains
-the active mode and these limits. Linux lite is tested locally; the CI matrix tests
-lite on Linux and macOS with Python 3.11 and 3.12. macOS CI must pass before release.
+the active mode and these limits. CI tests lite on Linux/macOS and the full suite on
+Windows Python 3.11–3.14, with explicit skips for Linux privilege/Unix socket tests.
+Windows CI additionally exercises ACLs, shims, process trees and a clean pipx install.
+
+### Native Windows or WSL2
+
+For native Windows, install Python 3.11+, Git for Windows 2.38+, pipx or uv, and the
+official Codex CLI and Claude Code for the **same Windows user**. Clone this repository,
+open PowerShell or cmd in that clone, and run the lite installation above. No admin
+session or bash is needed by aao. After `aao doctor`, keep `aao serve` running and use
+`aao watch 1` in a second console. `watch-open` prints the command to run manually.
+
+Detection supports `.exe`, npm `.cmd` shims (launched through their Node script), and
+`.ps1` shims. PowerShell execution policy is respected; if a `.ps1` is blocked, use a
+native executable or an npm installation. Generic batch shims reject shell metacharacters;
+prefer `.exe`/`.ps1` when custom paths or arguments contain them. No sandbox is silently
+weakened to make a CLI run. [Official OpenAI documentation](https://learn.chatgpt.com/docs/windows/windows-sandbox)
+describes the native Codex sandbox. Use [WSL2](https://learn.chatgpt.com/docs/windows/wsl)
+when your Codex version/workflow requires a Linux sandbox or Linux tools. Install Git,
+Python, aao, Codex and Claude **together inside WSL2**, keep repositories in its Linux
+filesystem (for example `~/src`), and run the Linux lite instructions there. Native
+Windows and WSL2 have separate configuration, state, paths and logins; do not mix them.
+
+The Claude plugin uses executable/argument hooks, with `aao.exe` on PATH, so hooks run
+without a shell. On a recent Claude Code, use the PowerShell tool for slash commands;
+if needed enable it with `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. See the official
+[hook exec-form reference](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form)
+and [PowerShell tool reference](https://code.claude.com/docs/en/tools-reference#powershell-tool).
+
+Paths with spaces are passed as arguments; quote paths you type in the console.
+Files and subprocess streams use UTF-8, with CRLF accepted on input. Controlled Git
+operations enable `core.longpaths=true` and use `core.autocrlf=false` in isolated
+workspaces, without editing your Git settings. Python/third-party tools still depend
+on Windows long-path support; prefer a short state directory if a tool hits MAX_PATH.
+`aao doctor` reports that limit. Git storage uses copies on Windows (no Developer Mode
+or symlink privilege), so large repositories require additional disk space and I/O.
+
+For background operation, optionally install a current-user Task Scheduler logon task:
+
+```text
+aao service install --windows
+```
+
+This starts at your **next logon**, with your interactive token and least privilege,
+using the installed Python environment and explicit config path. Keep that environment
+installed. It stores no password, does not elevate, and runs only while logged on.
+To start immediately use `aao serve`; Ctrl+C or `aao stop` drains and then stops workers. Cancellation
+terminates the engine process tree; Windows Job Objects also clean descendants if the
+service exits. Remove automatic startup with `aao service uninstall --windows` (it
+leaves an already running process alone). Managed-device policy may reject registration;
+in that case use a console process. Linux/macOS lite users can keep `aao serve` in a
+terminal or configure their own user process supervisor.
 
 ## Quickstart: full mode
 
@@ -561,11 +631,14 @@ Commands are registered in the bot menu. Portuguese aliases from the project's o
 ## CLI reference
 
 Every command is `aao <command>` (also installed as `ai-agents-orchestrator`). Portuguese aliases are accepted.
+Use `aao --config PATH <command>` to select a config explicitly.
 
 | Command | Purpose |
 | --- | --- |
 | `setup`, `doctor [--json] [--fix]` | configure; check and optionally create missing directories/example rules |
 | `serve [--dry-run] [--no-chat]` | run the service |
+| `stop` | gracefully stop the lite user process |
+| `service install --windows`, `service uninstall --windows` | manage current-user Windows logon startup |
 | `root-daemon` | run the optional privileged daemon |
 | `delegate --repo R --title T [--files a,b] [--briefing FILE \| --briefing-text TXT] [--description D] [--priority N]` | queue a task for Codex |
 | `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID [--short\|--full]`, `cancel ID`, `claim ID [--owner] [--files]` | board; `list` accepts `review`/`running` and returns English state labels; `result` defaults to short |
@@ -638,7 +711,7 @@ English; see the [glossary](#glossary).
 
 ## Limitations
 
-- Full mode requires Linux/systemd. Lite supports Linux and macOS without systemd; see the CI release gate above.
+- Full mode requires Linux/systemd. Lite supports Linux, macOS and native Windows without systemd; see OS support and the CI release gate above.
 - Codex's usage-limit message format is not documented; detection is tolerant but may miss new wording.
 - Initial interactive limit detection needs the StopFailure hook or `/context`; once recorded, reset scheduling and
   queued development continue without an open Claude session. Unknown reset times require a headless Claude login

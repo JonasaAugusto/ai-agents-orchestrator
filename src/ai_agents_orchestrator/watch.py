@@ -66,7 +66,7 @@ def formatar_evento(reg: dict) -> str | None:
 
 def tarefa(cfg, tid: int) -> dict | None:
     try:
-        con = sqlite3.connect(f"file:{cfg.db_quadro}?mode=ro", uri=True, timeout=2)
+        con = sqlite3.connect(cfg.db_quadro.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
         con.row_factory = sqlite3.Row
         r = con.execute("SELECT * FROM tarefas WHERE id=?", (tid,)).fetchone()
         con.close()
@@ -171,15 +171,16 @@ def abrir(tid: int | None, env: dict | None = None, which=None, rodar=None, prog
     """Opens `aao watch` beside the current session: a tmux split when inside tmux; else a new terminal window when a
     graphical session and a known terminal emulator exist; else returns the command to run by hand.
     Returns (how, command line)."""
+    from . import compat
     import os
     import shlex
     import shutil
     env = dict(os.environ) if env is None else env
     which = which or shutil.which
     rodar = rodar or (lambda argv: subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                                     stderr=subprocess.DEVNULL, start_new_session=True))
+                                                     stderr=subprocess.DEVNULL, **compat.process_group()))
     cmd = comando_watch(tid, prog)
-    linha = shlex.join(cmd)
+    linha = subprocess.list2cmdline(cmd) if compat.WINDOWS else shlex.join(cmd)
     if env.get("TMUX") and which("tmux"):
         rodar(["tmux", "split-window", "-h", "-l", "45%", linha])
         return "tmux", linha

@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 from unittest import mock
 
-from ai_agents_orchestrator import assistente, cli, config, doctor, engines, workspace
+from ai_agents_orchestrator import assistente, cli, compat, config, doctor, engines, workspace
 from tests.helpers import Base, sh
 from tests.test_doctor_setup import AmbienteFalso
 
@@ -22,7 +22,7 @@ class LiteConfig(unittest.TestCase):
     def test_user_paths_and_environment_overrides(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
-            path.write_text('mode = "lite"\n[paths]\nstate_dir = "' + tmp + '/state"\n')
+            path.write_text('mode = "lite"\n[paths]\nstate_dir = ' + json.dumps(tmp + '/state') + '\n')
             cfg = config.carregar({"AAO_CONFIG": str(path), "XDG_STATE_HOME": tmp})
             self.assertEqual(cfg.mode, "lite")
             for p in (cfg.socket, cfg.root_socket, cfg.rules_file, cfg.templates_dir, cfg.root_state):
@@ -58,6 +58,19 @@ class LiteSetup(unittest.TestCase):
     def setUp(self):
         self.addCleanup(config.definir_fuso, config.nome_fuso())
 
+    def test_setup_respects_config_selected_after_module_import(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            selected = root / "selected.toml"
+            old = root / "unselected.toml"
+            answers = iter(["lite", str(root / "state"), "UTC", "", "codex", "restricted", ""])
+            with patch.dict(os.environ, {"AAO_CONFIG": str(selected)}), patch.object(config, "CONFIG_FILE", old):
+                wizard = assistente.Assistente(entrada=lambda _: next(answers), saida=lambda _: None,
+                                               amb=AmbienteFalso())
+                self.assertEqual(wizard.executar(), 0)
+            self.assertTrue(selected.is_file())
+            self.assertFalse(old.exists())
+
     def test_setup_installs_plugin_checks_login_and_preserves_second_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "config.toml"
@@ -90,9 +103,17 @@ class LiteSetup(unittest.TestCase):
 
 
 class LiteWorkflow(Base):
+    native_lite = True
     def setUp(self):
         super().setUp()
         self.cfg.mode = "lite"
+        self.cfg.fonte_transcripts = self.dir / "transcripts"
+        self.cfg.fonte_memoria = self.dir / "memory"
+        self.cfg.rules_file = self.dir / "BASE_RULES.md"
+        self.cfg.division_file = self.dir / "DIVISION.md"
+        self.cfg.templates_dir = self.dir / "templates"
+        self.enterContext(patch.dict(os.environ, {"HOME": str(self.dir), "USERPROFILE": str(self.dir),
+                                                "CODEX_HOME": str(self.dir / ".codex")}))
         from ai_agents_orchestrator.lite import LocalBackend
         self.backend = LocalBackend(self.cfg)
 
@@ -109,7 +130,7 @@ class LiteWorkflow(Base):
 
     def test_publish_interactive_bound_to_sha_as_normal_user(self):
         tid, ws, branch, sha = self.ready()
-        with patch("os.geteuid", return_value=1000), patch("sys.stdout", new_callable=io.StringIO):
+        with patch.object(compat, "euid", return_value=1000), patch("sys.stdout", new_callable=io.StringIO):
             rc = cli._publicar(self.cfg, tid, root=self.backend, interativo=True, entrada=lambda _: f"{tid} {sha}")
         self.assertEqual(rc, 0)
         self.assertEqual(self.quadro.ver(tid)["estado"], "concluida")
@@ -229,6 +250,7 @@ class LiteWorkflow(Base):
         remote = self.cfg.repos["web-app"]["github_url"]
         self.assertNotEqual(sh("git", "--git-dir", remote, "rev-parse", "main").strip(), sha)
 
+    @unittest.skipIf(compat.WINDOWS, "Unix peer credentials; authenticated TCP is covered in test_windows")
     def test_local_socket_dispatch_authenticates_real_peer(self):
         self.svc.root = self.backend
         a, b = socket.socketpair()
@@ -254,7 +276,7 @@ class LiteWorkflow(Base):
             started.set()
             self.assertTrue(finish.wait(5))
         svc.rodar.side_effect = run
-        with patch("os.geteuid", return_value=1000), patch.object(cli, "montar_servico", return_value=svc), \
+        with patch.object(compat, "euid", return_value=1000), patch.object(cli, "montar_servico", return_value=svc), \
                 patch("sys.stdout", new_callable=io.StringIO):
             results = []
             thread = threading.Thread(target=lambda: results.append(lite.serve(self.cfg)))
@@ -268,6 +290,7 @@ class LiteWorkflow(Base):
             self.assertEqual(results, [0])
             self.assertEqual(svc.rodar.call_count, 1)
 
+    @unittest.skipIf(compat.WINDOWS, "AF_UNIX pathname limit; Windows uses TCP and a user endpoint file")
     def test_socket_startup_error_is_reported_without_hanging(self):
         self.cfg.socket = self.dir / ("x" * 120)
         thread = threading.Thread(target=self.svc.run_socket)
@@ -279,6 +302,7 @@ class LiteWorkflow(Base):
         self.assertFalse(thread.is_alive())
 
 
+@unittest.skipIf(compat.WINDOWS, "BSD/macOS getpeereid compatibility; no Unix peer API on Windows")
 class PortablePeer(unittest.TestCase):
     def test_bsd_getpeereid_without_linux_socket_option(self):
         from ai_agents_orchestrator import servico

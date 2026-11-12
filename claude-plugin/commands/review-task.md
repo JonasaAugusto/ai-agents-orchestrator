@@ -1,8 +1,10 @@
 ---
 description: Review a Codex task in layers before human-approved publication
 argument-hint: <task id>
-allowed-tools: Bash(aao status:*), Bash(aao review:*), Bash(aao result:*), Bash(aao list:*), Bash(aao show:*), Bash(aao hook-prompt:*), Bash(git:*), Read, Grep
+allowed-tools: Bash(aao status:*), Bash(aao review:*), Bash(aao result:*), Bash(aao list:*), Bash(aao show:*), Bash(aao hook-prompt:*), Bash(git:*), Read, Grep, PowerShell(aao status *), PowerShell(aao review *), PowerShell(aao result *), PowerShell(aao list *), PowerShell(aao show *), PowerShell(aao hook-prompt *), PowerShell(git *)
 ---
+
+On native Windows, run the commands through the PowerShell tool; no bash syntax is required.
 
 Review Codex task #$ARGUMENTS following the review protocol of the orchestrator-workflow skill:
 

@@ -1,3 +1,8 @@
+import sys
+import unittest
+if sys.platform == "win32":
+    raise unittest.SkipTest('Linux root daemon: uid switching, SO_PEERCRED, root-owned deployment scripts')
+
 import json
 import os
 import socket

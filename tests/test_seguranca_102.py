@@ -1,3 +1,8 @@
+import sys
+import unittest
+if sys.platform == "win32":
+    raise unittest.SkipTest('Linux privileged mirror and Git security: uid switching and POSIX symlink/ownership fixtures')
+
 """Regressions for audit #66. Disposable repositories, fake keys, no network/services."""
 import json
 import os

@@ -1,3 +1,8 @@
+import sys
+import unittest
+if sys.platform == "win32":
+    raise unittest.SkipTest('Linux privilege boundary: uid switching, /proc, root files and shell exploit fixtures')
+
 """Security fixes of 1.0.1: root never honours repo config in service-owned repos, secrets out of /proc, hardened
 workspace git, real owner approval for CLI publish, fixed wake-up notice, private config file."""
 import io

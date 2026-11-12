@@ -31,6 +31,7 @@ class TestHistorico(unittest.TestCase):
         for tabu in ("sk-abcdef", TOKEN, "eyJhbGci", "MIIabc", "supersecreto123", "xyz987"):
             self.assertNotIn(tabu, txt)
 
+    @unittest.skipIf(os.name == "nt", "POSIX mode 0640; Windows uses inherited user ACLs")
     def test_permissao_nao_world_readable(self):
         self.h.gravar(historico.BOT, "oi", 7)
         modo = stat.S_IMODE(os.stat(self.h.caminho).st_mode)

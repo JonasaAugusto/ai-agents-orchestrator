@@ -11,7 +11,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from .config import Config
-from . import arquivos_root, gitseguro
+from . import compat, arquivos_root, gitseguro
 
 RX_PERIGO = re.compile(r"(?i)^(--force(-with-lease)?|-f|--delete|-d|--mirror|--tags|--prune|\+.*|:.*)(=.*)?$")
 
@@ -22,13 +22,15 @@ class GitErro(Exception):
 
 # Workspace git runs OUTSIDE Codex's sandbox while Codex can write the workspace's .git/config: never honour hooks,
 # fsmonitor, credential helpers, proxies or filters from it. Git sees a private, fixed configuration.
-ENDURECER_WS = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=",
+ENDURECER_WS = ("-c", f"core.hooksPath={os.devnull}", "-c", "core.fsmonitor=false", "-c", "credential.helper=",
                 "-c", "core.gitProxy=", "-c", "protocol.ext.allow=never", "-c", "log.showSignature=false")
+if compat.WINDOWS:
+    ENDURECER_WS += ("-c", "core.longpaths=true", "-c", "core.autocrlf=false")
 # Keys a workspace .git/config may contain. Anything else (filter/diff/merge drivers, include*, core.* commands,
 # url.*.insteadOf, extensions.worktreeConfig...) is reported as tampering. This diagnostic is not a security boundary.
 RX_CONFIG_OK = re.compile(
     r"^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|"
-    r"eol|safecrlf)|extensions\.(objectformat|refstorage)|remote\.(origin|github)\.(url|fetch)|"
+    r"eol|safecrlf|longpaths)|extensions\.(objectformat|refstorage)|remote\.(origin|github)\.(url|fetch)|"
     r"branch\..+\.(remote|merge|rebase)|user\.(name|email)|commit\.gpgsign|gc\.auto|pull\.(rebase|ff)|"
     r"init\.defaultbranch|index\.(version|threads)|color\.[a-z.]+|advice\.[a-z]+)$")
 
@@ -57,7 +59,8 @@ def env_git(cfg: Config, repo: str | None = None) -> dict:
         chave = cfg.state_dir / ".ssh" / f"deploy-{repo}"
         e["GIT_SSH_COMMAND"] = (f"ssh -i {chave} -o IdentitiesOnly=yes -o BatchMode=yes "
                                 f"-o UserKnownHostsFile={cfg.state_dir}/.ssh/known_hosts -o StrictHostKeyChecking=yes")
-    e.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_SYSTEM="/dev/null", GIT_CONFIG_GLOBAL="/dev/null")
+    e.update(compat.windows_env())
+    e.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_GLOBAL=os.devnull)
     return e
 
 
@@ -67,7 +70,7 @@ def git(cfg: Config, args: list[str], cwd: Path | str | None = None, repo: str |
         raise GitErro(f"forbidden git argument: {' '.join(args)[:80]}")
     # Engines may write their workspace and /tmp. Keep service Git config outside both.
     # When called as root (CLI), its temporary parent must also be outside service control.
-    if os.geteuid() == 0 and cfg.mode != "lite":
+    if compat.euid() == 0 and cfg.mode != "lite":
         temporarios = cfg.shared_state / "private" / "git"
         os.close(arquivos_root.abrir_dir(temporarios, modo=0o700))
     else:
@@ -107,8 +110,8 @@ def git(cfg: Config, args: list[str], cwd: Path | str | None = None, repo: str |
                     break
         if private_args[0] == "clone":
             private_args.insert(1, "--no-local")
-        r = subprocess.run(["git", *ENDURECER_WS, *prefix, *private_args], cwd=cwd or "/", env=env_git(cfg, repo),
-                           capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(["git", *ENDURECER_WS, *prefix, *private_args], cwd=cwd or Path.cwd().anchor, env=env_git(cfg, repo),
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if check and r.returncode != 0:
         raise GitErro((r.stderr or r.stdout).strip()[-300:])
     return r
@@ -118,11 +121,11 @@ def auditar(cfg: Config, acao: str, repo: str, ref: str = "", hash_: str = "", r
     """Append-only log (O_APPEND). Optionally protect it with `chattr +a`."""
     linha = json.dumps({"quando": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "acao": acao, "repo": repo, "ref": ref,
                         "hash": hash_, "resultado": resultado, "extra": extra[:200]}, ensure_ascii=False) + "\n"
-    if os.geteuid() == 0 and cfg.mode != "lite":
+    if compat.euid() == 0 and cfg.mode != "lite":
         fd = arquivos_root.abrir_append(cfg.shared_state / "private" / "auditoria-workspace.jsonl")
     else:
         cfg.logs.mkdir(parents=True, exist_ok=True)
-        fd = os.open(cfg.logs / "auditoria.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        fd = os.open(cfg.logs / "auditoria.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
         os.write(fd, linha.encode())
     finally:

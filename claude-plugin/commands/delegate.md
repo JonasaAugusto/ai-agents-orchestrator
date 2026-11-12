@@ -1,8 +1,10 @@
 ---
 description: Delegate a well-scoped task to Codex through the orchestrator board
 argument-hint: <repo> <what to do>
-allowed-tools: Bash(aao delegate:*), Bash(aao list:*), Bash(aao hook-prompt:*), Bash(aao wait:*), Write
+allowed-tools: Bash(aao delegate:*), Bash(aao list:*), Bash(aao hook-prompt:*), Bash(aao wait:*), Write, PowerShell(aao delegate *), PowerShell(aao list *), PowerShell(aao hook-prompt *), PowerShell(aao wait *)
 ---
+
+On native Windows, run the commands through the PowerShell tool; no bash syntax is required.
 
 Delegate this to Codex using the orchestrator-workflow skill: $ARGUMENTS
 

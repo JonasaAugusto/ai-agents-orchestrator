@@ -16,12 +16,15 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from . import compat
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_DIR.parent.parent  # source checkout root (src layout); examples live here
 NOME = "ai-agents-orchestrator"
 CLI = "aao"
 def user_config_dir() -> Path:
+    if compat.WINDOWS:
+        return Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local"))) / NOME
     return Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / NOME
 
 
@@ -29,6 +32,8 @@ def default_config_file() -> Path:
     if os.environ.get("AAO_CONFIG"):
         return Path(os.environ["AAO_CONFIG"])
     local = user_config_dir() / "config.toml"
+    if compat.WINDOWS:
+        return local
     system = Path(f"/etc/{NOME}/config.toml")
     return local if local.exists() or not system.exists() else system
 
@@ -95,6 +100,7 @@ def ler_env_file(caminho: Path = ENV_FILE) -> dict[str, str]:
 @dataclass
 class Config:
     mode: str = "full"  # full: privileged daemon; lite: current user, one service process
+    local_transport: str = "auto"  # auto: Unix on POSIX, authenticated loopback TCP on Windows
     state_dir: Path = Path(f"/var/lib/{NOME}")
     root_state: Path = Path(f"/var/lib/{NOME}-root")  # bare clones used by the root daemon for pushes (root only)
     fonte_transcripts: Path = Path("/root/.claude/projects/-root")  # Claude Code transcripts of the watched project
@@ -200,6 +206,9 @@ class Config:
     def socket_path(self) -> Path:
         return Path(os.environ.get("AAO_SOCKET", str(self.socket)))
     @property
+    def use_tcp(self) -> bool:
+        return self.mode == "lite" and (compat.WINDOWS or self.local_transport == "tcp")
+    @property
     def espelho_estado(self) -> Path: return self.state_dir / "espelho-estado.json"
 
     def preparar_dirs(self) -> None:
@@ -211,6 +220,7 @@ class Config:
 
 # TOML key (section.key) -> (Config attribute, type). The same keys can be set with AAO_<SECTION>_<KEY>.
 ENV_MAP: dict[str, tuple[str, type]] = {
+    "service.local_transport": ("local_transport", str),
     "balance.enabled": ("balance_enabled", bool),
     "balance.claude_tokens_5h": ("claude_tokens_5h", int), "balance.claude_tokens_7d": ("claude_tokens_7d", int),
     "balance.codex_tokens_5h": ("codex_tokens_5h", int), "balance.codex_tokens_7d": ("codex_tokens_7d", int),
@@ -301,13 +311,15 @@ def carregar_repos(dados: dict | None = None) -> dict:
 def carregar(env: dict[str, str] | None = None, arquivo: Path | None = None) -> Config:
     e = dict(os.environ) if env is None else env
     dados = ler_toml(Path(e.get("AAO_CONFIG") or str(arquivo or CONFIG_FILE)))
-    mode = e.get("AAO_MODE", dados.get("mode", "full"))
+    mode = e.get("AAO_MODE", dados.get("mode", "lite" if compat.WINDOWS else "full"))
     if mode not in ("full", "lite"):
         raise ValueError("mode must be 'full' or 'lite'")
+    if compat.WINDOWS and mode == "full":
+        raise ValueError("full mode requires Linux; use mode = 'lite' on Windows")
     c = Config(mode=mode)
     if mode == "lite":
         import getpass
-        base = Path(e.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / NOME
+        base = compat.user_state_dir(e)
         conf = Path(e.get("AAO_CONFIG") or str(arquivo or CONFIG_FILE)).parent
         c.state_dir, c.root_state = base, base / "publisher"
         c.service_user = getpass.getuser()

@@ -38,7 +38,7 @@ class Plugin(unittest.TestCase):
         for evento, grupos in hooks.items():
             for g in grupos:
                 for h in g["hooks"]:
-                    argv = shlex.split(h["command"])
+                    argv = [h["command"], *h["args"]]
                     self.assertEqual(argv[0], "aao")
                     cli.parser().parse_args(argv[1:])  # raises SystemExit if the CLI does not accept it
         self.assertEqual(json.loads((RAIZ / "examples" / "claude-hooks.json").read_text())["hooks"], hooks)
