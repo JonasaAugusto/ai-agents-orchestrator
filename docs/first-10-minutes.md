@@ -28,6 +28,39 @@ Captured from the development checkout on Linux/Python 3.14, 2026-11-12:
 The checkout may contain unreleased changes. For a published release use the release selector on GitHub; compare
 `aao --version` with its changelog. These docs do not assert that this branch has been published.
 
+## Windows PowerShell: install and first use (lite mode)
+
+For native Windows 10/11 with Python 3.11+, Git for Windows, and the Codex CLI and Claude Code installed for the same
+Windows user. Run each line on its own (PowerShell 5.1 has no `&&`); no administrator session is needed.
+
+```powershell
+py -3 -m pip install --user pipx
+py -3 -m pipx ensurepath
+# Open a new PowerShell window so the PATH change applies, then:
+pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator
+aao --version
+aao setup
+aao doctor
+aao serve
+```
+
+Keep `aao serve` running in that window. In a second PowerShell window:
+
+```powershell
+aao delegate --repo myrepo --title "Add a health check" --briefing-text "Add GET /health and a test."
+aao list
+aao watch 1
+```
+
+What the CI checks on `windows-latest` (Python 3.11 to 3.14) for every push: `pipx install .` and `aao --version`; the
+guided `aao setup` and a second `aao setup` that preserves the config; `aao serve` as a user process with the
+authenticated loopback TCP socket, then `aao status`, `aao doctor --json`, `aao arm`, `aao disarm`, `aao list` and
+`aao stop`; the lite and Windows test modules and the full test suite, including `examples/offline_relay.py`. The
+`aao delegate` step above is covered through the same service API by the lite tests with a fake Codex, not by a
+real Codex account: the CI has no Codex or Claude login, so your own `aao setup` output on the logins and plugin
+lines is what confirms them. Replace `myrepo` with a repository you registered in `aao setup` (use a disposable one first).
+If `aao` is not found right after `pipx install`, open a new window or run `pipx ensurepath` and restart the shell.
+
 ## Minutes 2–5: run the offline relay
 
 ```bash
