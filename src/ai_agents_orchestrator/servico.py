@@ -13,7 +13,7 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-from . import config, engines, garantias, prompts, sanitize, workspace
+from . import config, engines, garantias, medicao, prompts, sanitize, workspace
 from .botoes import Botoes
 from .config import Config
 from .db import Estado, Quadro
@@ -134,6 +134,7 @@ class Servico:
         self._retomada_lock = threading.Lock()
         self._worker_lock = threading.Lock()
         self._claude_lock = threading.Lock()
+        self._usage_lock = threading.Lock()
         self.ring: deque = deque(maxlen=300)
         self._snaps: dict[int, dict] = {}  # snapshot of each running task (goes to the summary/HANDOFF)
         self.hist = Historico(cfg.logs / "historico.jsonl", relogio)
@@ -416,7 +417,7 @@ class Servico:
                                      snapshot=snap["texto"])
         res = self.codex.executar(prompt, ws, "workspace-write", self.cfg.task_timeout, self.estado.get("modelo"),
                                   resume=sessao.get("thread"), esforco=self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
-        self.estado.registrar_execucao("conversa", "codex", res.segundos, res.ok, str(tid), self.agora())
+        self.registrar_resultado("conversa", "codex", res, str(tid))
         if res.thread_id:
             sessao["thread"] = res.thread_id
             self.quadro.atualizar(tid, thread_id=res.thread_id)
@@ -525,7 +526,7 @@ class Servico:
                                          agora_iso=datetime.fromtimestamp(self.agora(), config.fuso()).isoformat(timespec="minutes"))
         res = self.codex.executar(prompt, self.cfg.mirror, "read-only", self.cfg.veredito_timeout,
                                   self.estado.get("modelo"), resume=thread, esforco=self.estado.get("esforco"))
-        self.estado.registrar_execucao("conversa", "codex", res.segundos, res.ok, "", self.agora())
+        self.registrar_resultado("conversa", "codex", res)
         if res.thread_id:
             self.estado.set("conversa_thread", res.thread_id)
         if res.limite:
@@ -572,6 +573,55 @@ class Servico:
         return gravar
 
     # ------------------------------------------------------------ motor
+    def balanceamento(self) -> dict:
+        return medicao.calcular(self.cfg, self.estado, self.agora())
+
+    def registrar_resultado(self, tipo: str, motor: str, res: engines.Resultado, ref: str = "") -> None:
+        self.estado.registrar_execucao(tipo, motor, res.segundos, res.ok, ref, self.agora(),
+                                      tokens_in=res.tokens_in, tokens_out=res.tokens_out)
+        self.alertar_balanceamento()
+
+    def alertar_balanceamento(self) -> None:
+        b = self.balanceamento()
+        if b["modo"] in ("disabled", "invalid"):
+            return
+        for nome, w in b["janelas"].items():
+            for motor, outro in (("claude", "codex"), ("codex", "claude")):
+                alto, baixo = w[motor]["usado_pct"], w[outro]["usado_pct"]
+                alerta = (alto is not None and baixo is not None and alto > self.cfg.balance_alert_high
+                          and baixo < self.cfg.balance_alert_low)
+                chave = f"balance_alert:{nome}:{motor}"
+                with self.estado._lock:
+                    anterior = self.estado.get(chave, False)
+                    self.estado.set(chave, alerta)
+                if alerta and not anterior:
+                    self.notificar("Usage imbalance: " + medicao.linha_janela(nome, w))
+
+    def atualizar_uso_codex(self) -> bool:
+        """Timer lane only; hooks/status/routing read cached counters without spawning models."""
+        if not self.cfg.balance_enabled or medicao.problemas_config(self.cfg) or not self._usage_lock.acquire(blocking=False):
+            return False
+        try:
+            agora = self.agora()
+            ultima = self.estado.get("balance_ultima_consulta")
+            if ultima is not None and 0 <= agora - ultima < self.cfg.balance_refresh_seconds:
+                return False
+            self.estado.set("balance_ultima_consulta", agora)
+            u = engines.uso_codex(self.cfg.state_dir, self.cfg.codex_bin, timeout=3)
+            if u.get("ok"):
+                self.estado.set("codex_uso_balance", {"quando": agora, "dados": u})
+            self.alertar_balanceamento()
+            return bool(u.get("ok"))
+        finally:
+            self._usage_lock.release()
+
+    def claude_usage(self, sessao: str | None = None) -> dict:
+        r = self.root.espelhar_uso(sessao)
+        # A failed refresh must not import a different session's stale tail.
+        n = medicao.importar_registros(self.estado, r.get("contadores", []), self.agora()) if r.get("ok") else 0
+        self.alertar_balanceamento()
+        return {"ok": bool(r.get("ok")), "mensagens": n, "uso": self.balanceamento()}
+
     def claude_limitado(self) -> bool:
         cl = self.estado.get("claude_limite", {})
         return bool(cl.get("ativo") and not cl.get("liberado"))
@@ -579,6 +629,8 @@ class Servico:
     def claude_dev_permitido(self) -> bool:
         # Conservative bridge to the balance policy: no more than half of all persisted dev attempts.
         if not self.cfg.claude_dev_fallback or self.claude_limitado():
+            return False
+        if self.estado.get("motor") == "auto" and self.balanceamento()["modo"] == "economico":
             return False
         if not self.claude or not self.claude.disponivel():
             return False
@@ -588,6 +640,8 @@ class Servico:
     def motor_efetivo(self) -> str:
         m = self.estado.get("motor", "codex")
         if self.claude_limitado():
+            return "codex"
+        if m == "auto" and self.balanceamento()["modo"] == "economico":
             return "codex"
         if self.agora() < self.codex_bloqueado_ate() and self.claude_dev_permitido():
             return "claude"
@@ -654,6 +708,7 @@ class Servico:
                             res = self.claude.executar("Reply only: ok", self.cfg.state_dir, timeout=90, agora=agora)
                         finally:
                             self._claude_lock.release()
+                        self.registrar_resultado("sonda", "claude", res)
                         liberado = res.ok
                         if res.limite and res.limite.reset_epoch:
                             cl.update(reset_epoch=res.limite.reset_epoch, reset_estimado=False)
@@ -727,7 +782,7 @@ class Servico:
         if not self.codex.logado() and self.motor_efetivo() == "codex":
             return False
         recentes = self.estado.execucoes_desde(agora - 3600, "tarefa")
-        if len(recentes) >= self.cfg.tarefas_por_hora:
+        if len(recentes) >= self.balanceamento()["tasks_per_hour"]:
             return False
         t = self.quadro.proxima_para_codex(set(self.cfg.repos))
         if not t:
@@ -807,7 +862,7 @@ class Servico:
                                           resume=t.get("claude_thread_id"), on_event=self.gravador_eventos(tid, "claude"))
             motor = "claude"
             if res.limite:
-                self.estado.registrar_execucao("tarefa", motor, res.segundos, res.ok, str(tid), self.agora())
+                self.registrar_resultado("tarefa", motor, res, str(tid))
                 self._registrar_claude_limite(res.limite, "claude -p")
                 if res.thread_id:
                     self.quadro.atualizar(tid, claude_thread_id=res.thread_id)
@@ -829,7 +884,7 @@ class Servico:
                                       resume=t.get("thread_id") if retomada else None,
                                       esforco=self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
             motor = "codex"
-        self.estado.registrar_execucao("tarefa", motor, res.segundos, res.ok, str(tid), self.agora())
+        self.registrar_resultado("tarefa", motor, res, str(tid))
         self.tarefa_atual = None
         if self._interrompido(res) or res.timeout:
             atual = self.quadro.ver(tid)
@@ -922,6 +977,7 @@ class Servico:
         bloqueada = not res.ok or rel == "bloqueada"
         erro = None if not bloqueada else ((res.erro or "timeout")[:300] if not res.ok else "Codex report declares a block (Status: blocked)")
         self.quadro.atualizar(tid, estado="bloqueada" if bloqueada else "em_revisao", patch=info["patch"], resumo=narrativa[:4000],
+                              diffstat=info["diffstat"],
                               alterados=info["arquivos"], fim=self.agora(), aviso=aviso, erro=erro,
                               visto_claude=0, branch=info["branch"])
         self.estado.set("ultimo_resultado", tid)
@@ -1023,7 +1079,7 @@ class Servico:
         res = self.codex.executar(prompt, self.cfg.mirror, "read-only", self.cfg.veredito_timeout,
                                   self.estado.get("modelo"), schema=prompts.SCHEMA_CONTEXTO,
                                   esforco=self.estado.get("esforco"))
-        self.estado.registrar_execucao("contexto", "codex", res.segundos, res.ok, "")
+        self.registrar_resultado("contexto", "codex", res)
         if res.limite:
             ate = res.limite.reset_epoch or int(self.agora() + 1800)
             self.estado.set("codex_limite", {"desde": self.agora(), "ate": ate, "texto": res.limite.texto[:200]})
@@ -1280,7 +1336,15 @@ class Servico:
             return {"ok": True, "tarefas": [self._resumo(t) for t in ts]}
         if c in ("ver", "resultado"):
             t = self.quadro.ver(int(req.get("id", 0)))
+            if t and (req.get("short") or (c == "resultado" and not req.get("full"))):
+                t = {"id": t["id"], "estado": t["estado"], "branch": t["branch"], "diffstat": t["diffstat"],
+                     "aviso": t["aviso"], "erro": t["erro"],
+                     "resumo": "\n".join(l[:300] for l in (t["resumo"] or "").splitlines()[:10])}
             return {"ok": bool(t), "tarefa": t} if t else {"ok": False, "erro": "not found"}
+        if c == "claude_usage":
+            return self.claude_usage(req.get("session_id"))
+        if c == "balanceamento":
+            return {"ok": True, **self.balanceamento()}
         if c == "revisar":
             return self.revisar(req.get("repo", ""), req.get("branch", ""), req.get("titulo"))
         if c == "cancelar":
@@ -1324,7 +1388,8 @@ class Servico:
 
     def status(self) -> dict:
         cl = self.estado.get("claude_limite", {})
-        return {"motor": self.estado.get("motor", "codex"), "orchestrator": self.cfg.orchestrator,
+        return {"uso": self.balanceamento(), "execucoes": self.estado.ultimas_execucoes(),
+                "motor": self.estado.get("motor", "codex"), "orchestrator": self.cfg.orchestrator,
                 "retomada_agendada": self.agendamento(), "modelo": self.estado.get("modelo") or "Codex default",
                 "esforco": self.estado.get("esforco") or "Codex default",
                 "pausado": bool(self.estado.get("pausado", False)), "auto": self.auto(), "armado": self.armado(),
@@ -1351,6 +1416,7 @@ class Servico:
         while not self.parar_ev.is_set():
             try:
                 self.tick_retomada()
+                self.atualizar_uso_codex()
             except Exception as e:
                 self.log(f"resume timer: {type(e).__name__}: {e}")
             self.parar_ev.wait(1)

@@ -4,17 +4,46 @@
     "StopFailure": [
       {
         "matcher": "rate_limit",
-        "hooks": [{ "type": "command", "command": "aao claude-limit", "timeout": 10 }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "aao claude-limit",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
       {
-        "hooks": [{ "type": "command", "command": "aao hook-prompt --event UserPromptSubmit", "timeout": 10 }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "aao hook-prompt --event UserPromptSubmit",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SessionStart": [
       {
-        "hooks": [{ "type": "command", "command": "aao hook-prompt --event SessionStart", "timeout": 10 }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "aao hook-prompt --event SessionStart",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "aao claude-usage",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }

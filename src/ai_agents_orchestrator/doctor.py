@@ -258,7 +258,42 @@ def checar_agendamento(cfg: Config) -> list[Item]:
 def diagnosticar(cfg: Config, amb: Ambiente | None = None, settings: list[Path] | None = None) -> list[Item]:
     amb = amb or Ambiente()
     return (checar_base(cfg, amb) + checar_codex(cfg, amb) + checar_claude(cfg, amb, settings)
-            + checar_canal(cfg, amb) + checar_repos(cfg, amb) + checar_agendamento(cfg))
+            + checar_canal(cfg, amb) + checar_repos(cfg, amb) + checar_agendamento(cfg)
+            + checar_medicao(cfg, amb, settings))
+
+
+def checar_medicao(cfg: Config, amb: Ambiente | None = None, settings: list[Path] | None = None) -> list[Item]:
+    """Read-only: schema readiness, configurable quotas and Stop-hook installation."""
+    from . import medicao
+    amb = amb or Ambiente()
+    erros = medicao.problemas_config(cfg)
+    itens = [Item("usage balance config", FALHA if erros else OK,
+                  "; ".join(erros) if erros else f"target ratio {cfg.balance_ratio_low}–{cfg.balance_ratio_high}; enabled={cfg.balance_enabled}")]
+    faltam = [f"{m}_tokens_{j}" for m in ("claude", "codex") for j in medicao.JANELAS
+              if getattr(cfg, f"{m}_tokens_{j}") == 0]
+    itens.append(Item("usage quotas", AVISO if faltam else OK,
+                      "unknown: " + ", ".join(faltam) if faltam else "token quotas configured",
+                      "Calibrate [balance] token quotas; unknown usage never triggers routing. Codex account limits take precedence." if faltam else ""))
+    textos = [amb.ler(p) or "" for p in (settings or [Path.home() / ".claude" / "settings.json"])]
+    achou = any("claude-usage" in txt for txt in textos)
+    itens.append(Item("claude usage hook", OK if achou else AVISO,
+                      "Stop counter hook found" if achou else "Stop counter hook not confirmed",
+                      "Update the plugin to 1.1.0 or merge examples/claude-hooks.json; Stop must run aao claude-usage." if not achou else ""))
+    if cfg.db_estado.exists():
+        try:
+            with sqlite3.connect(cfg.db_estado.as_uri() + "?mode=ro", uri=True) as c:
+                cols = {r[1] for r in c.execute("PRAGMA table_info(execucoes)")}
+                ok = {"tokens_in", "tokens_out", "usage_key"} <= cols
+            itens.append(Item("usage schema", OK if ok else AVISO, "ready" if ok else "additive migration pending",
+                              "Restart the service after operator approval to add the counter columns." if not ok else ""))
+        except sqlite3.Error:
+            itens.append(Item("usage schema", FALHA, "cannot read state database"))
+    else:
+        itens.append(Item("usage schema", INFO, "no state database yet; service creates counter columns"))
+    itens.append(Item("usage mirror", OK if amb.stat(cfg.mirror / "transcript-cauda.jsonl") else AVISO,
+                      "counter source: mirrored transcript tail (no conversation stored in accounting)",
+                      "Run aao claude-usage after a Claude turn; the root daemon refreshes only the transcript."))
+    return itens
 
 
 def main(cfg: Config, como_json: bool = False, amb: Ambiente | None = None, saida=print, settings=None) -> int:

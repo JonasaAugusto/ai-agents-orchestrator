@@ -86,6 +86,47 @@ The default task timeout is **3600 seconds**, configurable with `service.task_ti
 Interrupted chat requests also wait for the reset and keep their session beyond the normal inactivity window;
 cancelling a queued chat request prevents automatic resumption.
 
+## Usage measurement and balance (1.1.0)
+
+`aao status --brief` prints exactly five lines: 5-hour and 7-day usage/ratio, queue state, scheduled resets and the
+effective hourly task cap. `aao status` also exposes token counters for the last ten executions and each rolling
+window. `aao result <id>` now defaults to `--short`: state, branch, stored diffstat, warnings/errors and at most ten
+report lines. `--full` retains the complete task record; `aao show <id>` remains full by default. Old results without
+a stored diffstat display `-` and never run Git just to show a summary.
+
+The plugin's lightweight `Stop` hook runs `aao claude-usage`. The root daemon refreshes only the selected session's
+transcript tail, without repositories, memory or model calls. Accounting stores timestamps, hashed message ids and
+input/output counters in the existing execution table; it does not store conversation content. Repeated Stop hooks,
+overlapping tails and streamed blocks do not duplicate a message. Codex `turn.completed.usage`, Claude headless
+results, chat turns, handoff checks and availability probes are counted as well. SQLite migration only adds columns
+and indexes, preserving historical runs (whose unknown token counts start at zero).
+
+Configure `[balance]` in [config.example.toml](examples/config.example.toml). Claude usage is total measured tokens
+divided by an **operator-calibrated token quota** for each window, not an official Claude plan percentage. Claude
+input includes uncached, cache-read and cache-creation tokens; Codex cached input is already part of input tokens.
+These counters estimate quota consumption, not money or equal work across models. Zero quotas mean unknown (`?`).
+The background timer reads Codex `account/rateLimits/read`, matching windows by duration (300/10080 minutes); fresh
+account percentages take precedence, while local token totals remain visible. Stale samples, expired resets or an
+unavailable account reader fall back to configured Codex token quotas. No provider request runs in the prompt hook
+or status path. `aao doctor` checks quota settings, schema readiness, mirror availability and Stop-hook setup.
+
+The target Claude/Codex usage ratio is **0.7–1.4**, configurable. Above 1.4 in either window, the prompt hook asks
+Claude to delegate review/test verification to Codex, use `result --short` and avoid reading diffs; `auto` routes
+development and cross-review to Codex. Below 0.7, Claude may review directly and `tasks_per_hour` is reduced by
+`low_ratio_tasks_factor` (default 0.5, rounded down, minimum one when the original cap is positive). High Claude
+usage in either window takes precedence over a low ratio in the other. Explicit engine selection, human publication
+approval, file locks and hard usage limits remain in force; economic mode can make headless fallback wait for Codex.
+Positive Claude usage with zero Codex usage is above target; both zero or missing data is unknown and leaves routing
+and the hourly cap unchanged. `balance.enabled = false` disables guidance, automatic balancing and alerts, while
+keeping accounting. A channel alert fires when one engine is above 85% and the other below 50%, once per imbalance
+episode/window; thresholds are configurable. Without a channel there is no remote alert delivery.
+
+`service.tasks_per_hour` and `service.handoff_checks_per_day` are independent cost levers: the first caps task
+attempts, the second real Codex handoff checks. Lowering either saves calls but slows progress. Token coverage starts
+with observed executions and mirrored sessions; only records present in the bounded recent transcript tail can be
+imported. Separate subagent transcript files, missed sessions and old history are not reconstructed. Update the
+plugin (or merge [claude-hooks.json](examples/claude-hooks.json)) and calibrate quotas before relying on the ratio.
+
 ## Features
 
 | Area | What you get |
@@ -330,14 +371,14 @@ Every command is `aao <command>` (also installed as `ai-agents-orchestrator`). P
 | `serve [--dry-run] [--no-chat]` | run the service |
 | `root-daemon` | run the optional privileged daemon |
 | `delegate --repo R --title T [--files a,b] [--briefing FILE \| --briefing-text TXT] [--description D] [--priority N]` | queue a task for Codex |
-| `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID`, `cancel ID`, `claim ID [--owner] [--files]` | board |
+| `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID [--short\|--full]`, `cancel ID`, `claim ID [--owner] [--files]` | board; result defaults to short |
 | `wait ID [--timeout S]` | block until a final state (exit 0 review/completed, 1 blocked/cancelled, 2 timeout) |
 | `review --repo R --branch B` | cross-review by Codex (read-only) |
 | `publish ID` | root only, interactive terminal: the owner types the task id to merge + push a reviewed task delegated by Claude |
 | `watch [ID] [--no-follow]`, `watch-open [ID]` | live view |
 | `status [--brief]`, `pause`, `resume` | service state, durable resume schedule and queue |
 | `arm`, `disarm` | automatic handoff on Claude's usage limit |
-| `claude-limit`, `hook-prompt [--event E]`, `claude-resumed`, `note` | Claude Code hook glue and notes |
+| `claude-limit`, `claude-usage`, `hook-prompt [--event E]`, `claude-resumed`, `note` | Claude Code hook glue, token counters and notes |
 | `briefing-status`, `briefing-check` | living briefing |
 | `history [--last N] [--since YYYY-MM-DD] [--search TEXT]` | chat channel history |
 | `mirror [--no-repos]` | refresh the mirror now |

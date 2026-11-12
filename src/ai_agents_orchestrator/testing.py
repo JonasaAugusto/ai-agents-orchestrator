@@ -59,6 +59,10 @@ class RootFalso:
         self.chamadas.append(("espelhar", hook))
         return {"ok": True}
 
+    def espelhar_uso(self, sessao=None):
+        self.chamadas.append(("claude_usage", sessao))
+        return {"ok": True}
+
     def acordar_claude(self, tipo, tid=None, estado=None):
         """Records the text the REAL daemon would build from these fields (never free text)."""
         from . import root_daemon

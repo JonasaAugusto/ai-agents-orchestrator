@@ -2,7 +2,7 @@
 
 Mechanical and on demand (no timers/polling). Delivers to Codex, in <state_dir>-root-shared/mirror:
   - transcript-cauda.jsonl: ONLY the recent tail of the Claude Code session (last N text messages + API error
-    records), without tool output. Codex uses it only to CHECK Claude's BRIEFING.md;
+    records + hashed token counters), without tool output. Codex uses it only to CHECK Claude's BRIEFING.md;
   - memoria/*.md: Claude Code memory files, masked;
   - hook-sinal.json: payload of the StopFailure hook (error, message, time);
   - repos-status.json + ../repos/<name>.git: bare clones of the allowed repos (including Claude's local
@@ -17,13 +17,14 @@ import grp
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import arquivos_root, gitseguro, sanitize
+from . import arquivos_root, gitseguro, medicao, sanitize
 from .config import Config
 
 USUARIO = "aao"  # replaced by cfg.service_user (see _ids)
@@ -39,6 +40,7 @@ READ FIRST: BRIEFING.md in the configured service state_dir/para-codex (and the 
 This mirror is for CHECKING the briefing, not for rebuilding the context from scratch.
 
 - transcript-cauda.jsonl: last text messages of the Claude Code session (papel: usuario=user | assistente=assistant | erro=error).
+  "uso" records contain only timestamp, hashed message id and input/output token counters for accounting.
   "erro" records carry error/apiError/status and, when present, reset_epoch and tipo_limite (five_hour, seven_day).
   Limit messages look like: "You've hit your session limit · resets 2:40pm (Area/City)" or
   "You've hit your weekly limit · resets Nov 9, 2am (...)".
@@ -87,6 +89,7 @@ def cauda_transcript(src: Path, max_msgs: int = 60, tail_bytes: int = TAIL_BYTES
     msgs: list[dict] = []
     erros: list[dict] = []
     tools: dict = {}
+    usos: dict = {}
     for linha in linhas:
         if not linha.strip():
             continue
@@ -94,6 +97,15 @@ def cauda_transcript(src: Path, max_msgs: int = 60, tail_bytes: int = TAIL_BYTES
             d = json.loads(linha)
         except ValueError:
             continue
+        if not isinstance(d, dict):
+            continue
+        uso = medicao.registro_uso(d, src.stem)
+        if uso:
+            anterior = usos.get(uso["id"], uso)
+            for campo in ("tokens_in", "tokens_out"):
+                uso[campo] = max(uso[campo], anterior[campo])
+            uso["t"] = anterior["t"]
+            usos[uso["id"]] = uso
         for reg in sanitize.registro_para_espelho(d, tools, max_texto=max_texto):
             if reg["papel"] == "erro":
                 erros.append(reg)
@@ -103,7 +115,7 @@ def cauda_transcript(src: Path, max_msgs: int = 60, tail_bytes: int = TAIL_BYTES
     cauda.sort(key=lambda r: r.get("t") or "")
     for r in cauda:
         r["texto"] = sanitize.mascarar(r["texto"], dev)
-    return cauda
+    return cauda + list(usos.values())
 
 
 def _sessao_atual(cfg: Config) -> Path | None:
@@ -322,7 +334,8 @@ def atualizar_repos(cfg: Config, nomes: list[str] | None = None) -> dict:
 
 
 def espelhar(cfg: Config, agora: float | None = None, hook_payload: dict | None = None,
-             com_repos: bool = True, cauda_msgs: int = 60) -> dict:
+             com_repos: bool = True, cauda_msgs: int = 60, *, so_transcript: bool = False,
+             sessao: str | None = None) -> dict:
     """One on-demand pass. Protected by flock."""
     agora = agora if agora is not None else time.time()
     uid, gid = _ids(cfg.service_user)
@@ -336,13 +349,23 @@ def espelhar(cfg: Config, agora: float | None = None, hook_payload: dict | None 
         lock.close()
         return {"ok": False, "motivo": "another pass in progress"}
     try:
-        src = _sessao_atual(cfg)
+        if sessao is not None:
+            if not isinstance(sessao, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sessao):
+                return {"ok": False, "motivo": "invalid session id"}
+            src = cfg.fonte_transcripts / (sessao + ".jsonl")
+            # Never follow a session symlink outside the configured transcript directory.
+            if src.is_symlink() or not src.is_file():
+                return {"ok": False, "motivo": "session transcript not found"}
+        else:
+            src = _sessao_atual(cfg)
         n = 0
         if src:
             cauda = cauda_transcript(src, cauda_msgs)
             n = len(cauda)
             _gravar(cfg.mirror / "transcript-cauda.jsonl",
                     "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in cauda), gid)
+        if so_transcript:
+            return {"ok": bool(src), "cauda": n, "contadores": [r for r in cauda if r["papel"] == "uso"] if src else []}
         nmem = _espelhar_memoria(cfg, gid)
         if hook_payload:
             hook = {"recebido_em": agora_iso(agora), "error": hook_payload.get("error"),

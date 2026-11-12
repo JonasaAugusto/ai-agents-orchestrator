@@ -1,12 +1,16 @@
 ---
 description: Review a Codex task with the full protocol before anything is published
 argument-hint: <task id>
-allowed-tools: Bash(aao result:*), Bash(aao show:*), Bash(git:*), Read, Grep
+allowed-tools: Bash(aao status:*), Bash(aao result:*), Bash(aao show:*), Bash(aao review:*), Bash(git:*), Read, Grep
 ---
 
 Review Codex task #$ARGUMENTS following the review protocol of the orchestrator-workflow skill:
 
-1. `aao result $ARGUMENTS`: read the summary, the declared Status line, the branch, the patch path and any warning
+First run `aao status --brief`. In economic mode, read `aao result $ARGUMENTS --short`, delegate the branch
+review and test verification with `aao review --repo R --branch B`, and wait for its short result. Do not read
+diffs or repeat tests in Claude. Approval and publishing still require the human. Otherwise review directly:
+
+1. `aao result $ARGUMENTS --short`: read the summary, the declared Status line, the branch and any warning
    (PARTIAL, REVIEW DELETIONS, time-dependent tests, snapshot warnings).
 2. Read the whole diff yourself (`git -C <workspace> diff <base>...<branch>`), as a reviewer, not just the summary.
 3. For every new test, prove it fails without the change and passes with it.

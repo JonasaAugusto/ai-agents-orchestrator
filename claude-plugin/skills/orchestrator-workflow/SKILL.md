@@ -43,12 +43,20 @@ Do not loop over `aao show`.
 
 ## Review protocol (before anything is published)
 
-Codex's own report is a claim, not evidence. For every task in review (`/review-task <id>` runs this):
+Start with `aao status --brief` and `aao result <id> --short` (the default). The balance hook may request
+economic mode: delegate the cross-review and test verification to Codex, use `result --short`, and do not read
+diffs or repeat the suite in Claude. Ask the reviewer to return concrete findings, red/green evidence and the
+restored mutation check. Read the short review result when it arrives; no polling. An unavailable quota is unknown,
+not permission to assume either engine has spare capacity. Below the configured ratio, Claude may review directly.
 
-1. `aao result <id>`: read the first line. `Status: partial` and `Status: blocked` are not done; treat them as
+Codex's own report is a claim, not evidence. The assigned reviewer follows this protocol for every task in review
+(`/review-task <id>` selects the reviewer according to the balance instruction):
+
+1. `aao result <id> --short`: read the declared Status/Estado line in the report. `Status: partial` and `Status: blocked` are not done; treat them as
    unfinished work, whatever the exit code was. Note warnings: PARTIAL, REVIEW DELETIONS, time-dependent tests,
    snapshot warnings.
-2. Read the whole diff yourself, line by line, as a reviewer. Large deletions in docs need a reason.
+2. Read the whole diff, line by line, as a reviewer. Large deletions in docs need a reason. In economic mode,
+   Codex performs this step; Claude reads the review findings. Use `aao result <id> --full` only when details are needed.
 3. For each new test, prove it fails without the change and passes with it (revert the key line, run, restore).
 4. Run the full suite yourself, with a disposable database or fixtures, never shared or production data.
 5. Verdict: approve, adjust (concrete list, then delegate the fix or do it), or reject.
@@ -83,7 +91,8 @@ a snapshot you can summarize here.
 
 ## Useful commands
 
-`aao status`, `aao list [--state S] [--owner claude|codex]`, `aao show <id>`, `aao result <id>`, `aao cancel <id>`,
+`aao status --brief`, `aao claude-usage`, `aao list [--state S] [--owner claude|codex]`, `aao show <id>`,
+`aao result <id> --short` (default), `aao result <id> --full`, `aao cancel <id>`,
 `aao claim <id>`, `aao note`, `aao briefing-status`, `aao history --last 50` (chat channel history, useful when the
 user refers to something said on their phone). Internal states: pendente=pending, em_andamento=in progress,
 em_revisao=in review, concluida=completed, bloqueada=blocked, cancelada=cancelled.

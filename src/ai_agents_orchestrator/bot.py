@@ -213,6 +213,8 @@ class Bot:
         if not u.get("ok"):
             kb = self.s.botoes.teclado("usage", {}, [("Try again", "atualizar")])
             return self.s.editar(mid, cartao.cartao_erro(u.get("erro")), kb, html=True)
+        self.estado.set("codex_uso_balance", {"quando": agora, "dados": u})
+        self.s.alertar_balanceamento()
         bot = {"modelo": self.estado.get("modelo") or "Codex default", "esforco": self.estado.get("esforco") or "Codex default",
                "acordadas": self.estado.contagem_dia("acordadas", self.s.hoje()), "teto": self.s.teto_acordadas(),
                "tarefas_hora": len(self.estado.execucoes_desde(agora - 3600, "tarefa")), "teto_tarefas": self.cfg.tarefas_por_hora}

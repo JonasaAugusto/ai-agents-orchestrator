@@ -100,6 +100,9 @@ def montar_servico(cfg, dry_run: bool, sem_telegram: bool, chave: str | None = N
 def _hook_prompt(cfg, evento: str) -> int:
     """UserPromptSubmit/SessionStart: stdout becomes Claude context. Note from Codex + briefing reminder."""
     partes = []
+    b = chamar(cfg, {"cmd": "balanceamento"}, timeout=2)
+    if b.get("ok") and b.get("instrucao"):
+        partes.append(b["instrucao"])
     r = chamar(cfg, {"cmd": "recado", "limite": 2500}, timeout=5)
     if r.get("ok") and r.get("texto"):
         partes.append(r["texto"])
@@ -302,6 +305,7 @@ def parser() -> argparse.ArgumentParser:
     e = _sub(sp, "mirror", "espelhar", help="refresh the mirror now (transcript tail, memory, repos)")
     e.add_argument("--no-repos", "--sem-repos", dest="sem_repos", action="store_true")
     _sub(sp, "claude-limit", "claude-limite", help="hook glue for StopFailure(rate_limit): forwards the payload")
+    _sub(sp, "claude-usage", help="record Claude transcript token counters (Stop hook; always exits 0)")
     _sub(sp, "claude-resumed", "claude-assumiu", help="Claude is back: marks the baton and notes as read")
     st = _sub(sp, "status", help="service status")
     st.add_argument("--brief", action="store_true", help="short queue and resume schedule")
@@ -334,6 +338,10 @@ def parser() -> argparse.ArgumentParser:
                          ("cancel", "cancelar", "cancel a task")):
         x = _sub(sp, n, pt, help=ajuda)
         x.add_argument("id", type=int)
+        if n in ("show", "result"):
+            modos = x.add_mutually_exclusive_group()
+            modos.add_argument("--short", action="store_true", help="status, branch, diffstat, warnings and up to 10 report lines")
+            modos.add_argument("--full", action="store_true", help="complete task record")
     w = _sub(sp, "wait", "esperar", help="wait for a task to reach a final state (exit 0 = review/completed)")
     w.add_argument("id", type=int)
     w.add_argument("--timeout", type=int, default=0)
@@ -406,6 +414,15 @@ def main(argv=None) -> int:
                 payload = None
         chamar(cfg, {"cmd": "claude_limite", "payload": payload}, timeout=5)
         return 0  # the hook must never fail nor slow Claude down
+    if cmd == "claude-usage":
+        # Whitelist only the session id; never forward or print the hook's conversation payload.
+        try:
+            payload = json.loads(sys.stdin.read(65536) or "{}") if not sys.stdin.isatty() else {}
+            sessao = payload.get("session_id") if isinstance(payload, dict) else None
+            chamar(cfg, {"cmd": "claude_usage", "session_id": sessao}, timeout=4)
+        except (OSError, ValueError, TypeError):
+            pass
+        return 0
     if cmd == "history":
         try:
             regs = historico.consultar(cfg.logs / "historico.jsonl", a.ultimas, a.desde, a.busca)
@@ -467,6 +484,8 @@ def main(argv=None) -> int:
         req.update(estados=[a.estado] if a.estado else None, dono=a.dono)
     elif cmd in ("show", "result", "cancel"):
         req["id"] = a.id
+        if cmd in ("show", "result"):
+            req.update(short=a.short, full=a.full)
     elif cmd == "review":
         req.update(repo=a.repo, branch=a.branch, titulo=a.titulo)
     elif cmd == "claim":
@@ -477,8 +496,20 @@ def main(argv=None) -> int:
         agenda = r.get("retomada_agendada") or {}
         def hora(epoch):
             return datetime.fromtimestamp(epoch, config.fuso()).strftime("%H:%M") if epoch else "-"
-        print(f"fila: {r.get('fila', 0)}; pausado: {r.get('pausado', False)}")
+        from .medicao import linha_janela
+        uso = r.get("uso", {})
+        for nome in ("5h", "7d"):
+            print(linha_janela(nome, uso.get("janelas", {}).get(nome, {})))
+        print(f"fila: {r.get('fila', 0)}; pausado: {r.get('pausado', False)}; tarefa: {r.get('tarefa_atual') or '-'}")
         print(f"retomada agendada: Claude {hora(agenda.get('claude'))} / Codex {hora(agenda.get('codex'))}")
+        print(f"balance: {uso.get('modo', 'unknown')}; tasks_per_hour: {uso.get('tasks_per_hour', '?')}")
+        return 0
+    if cmd in ("result", "show") and (a.short or (cmd == "result" and not a.full)) and r.get("ok"):
+        t = r["tarefa"]
+        print(f"Status: {t['estado']}\nBranch: {t.get('branch') or '-'}")
+        print(f"Diffstat: {t.get('diffstat') or '-'}")
+        print(f"Warnings: {t.get('aviso') or '-'}; error: {t.get('erro') or '-'}")
+        print(t.get("resumo") or "(no report)")
         return 0
     if cmd == "note":
         print(r.get("texto", ""))

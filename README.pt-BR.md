@@ -77,6 +77,45 @@ padrão é **3600 segundos**, ajustável por `service.task_timeout`, `AAO_SERVIC
 Pedidos interrompidos no chat também aguardam o reset e preservam a sessão além do prazo normal de inatividade;
 cancelar um pedido pendente impede sua retomada automática.
 
+## Medição e equilíbrio de uso (1.1.0)
+
+`aao status --brief` entrega cinco linhas: uso/razão em 5 horas e 7 dias, fila, resets e teto efetivo por hora.
+`aao status` também mostra tokens de entrada/saída das últimas dez execuções e os totais por janela.
+`aao result <id>` usa `--short` por padrão: estado, branch, diffstat salvo, avisos/erros e até dez linhas do relatório.
+`--full` mantém o registro completo; `aao show <id>` continua completo por padrão. Resultados antigos sem diffstat
+mostram `-`, sem executar Git só para montar o resumo.
+
+O hook `Stop` chama `aao claude-usage`, que atualiza apenas a cauda do transcript da sessão, sem repositórios,
+memória ou chamadas de modelo. A contabilidade guarda somente horário, hash do identificador e contadores na tabela
+de execuções; não guarda conversa. Hooks repetidos, caudas sobrepostas e blocos da mesma mensagem não duplicam
+tokens. Conta também `turn.completed.usage` do Codex, resultados Claude headless, conversas, verificações de handoff
+e sondas de disponibilidade. A migração SQLite é aditiva e idempotente; execuções antigas começam com contadores zero.
+
+Configure `[balance]` em [config.example.toml](examples/config.example.toml). O percentual do Claude é uma
+**estimativa por tokens/cota calibrada pelo operador**, não o percentual oficial do plano. A entrada do Claude soma
+tokens sem cache, leitura e criação de cache; no Codex os tokens em cache já integram a entrada. Não mede dinheiro
+nem presume trabalho equivalente entre modelos. Cota zero significa desconhecida (`?`). O timer consulta
+`account/rateLimits/read` do Codex e associa as janelas pela duração (300/10080 minutos); percentuais recentes têm
+preferência. Amostra vencida, reset ultrapassado ou consulta indisponível usa a cota de tokens configurada como
+alternativa. Hook de prompt e status consultam somente dados locais. `aao doctor` confere configuração, cotas,
+colunas da tabela, espelho e instalação do hook Stop.
+
+A razão alvo Claude/Codex é **0,7–1,4**, configurável. Acima de 1,4 em qualquer janela, o hook injeta
+“modo economico: delegue revisao/testes ao Codex, use result --short, nao leia diffs”; o motor `auto` usa Codex para
+desenvolvimento e revisão cruzada. Abaixo de 0,7, libera revisão direta pelo Claude e reduz `tasks_per_hour` pelo
+fator `low_ratio_tasks_factor` (padrão 0,5, arredonda para baixo, mínimo um se o teto original era positivo).
+Razão alta em uma janela prevalece sobre baixa na outra. Motor explícito, travas, limites reais e aprovação humana
+continuam valendo; no modo econômico o fallback headless pode esperar o reset do Codex. Claude positivo/Codex zero
+fica acima da faixa; ambos zero ou dado ausente não muda roteamento/teto. `balance.enabled = false` desliga
+orientação, balanceamento e alertas, mantendo os contadores. O canal alerta quando um lado passa de 85% e o outro
+está abaixo de 50%, uma vez por episódio/janela; limiares configuráveis. Sem canal, não há entrega remota do alerta.
+
+`service.tasks_per_hour` limita tentativas de tarefa; `service.handoff_checks_per_day` limita verificações reais de
+contexto pelo Codex: são alavancas independentes de custo, com impacto na velocidade. A cobertura começa nas
+execuções observadas e sessões espelhadas; só importa registros presentes na cauda recente limitada. Arquivos
+separados de subagentes, sessões perdidas e histórico antigo não são reconstruídos. Atualize o plugin ou mescle
+[claude-hooks.json](examples/claude-hooks.json) e calibre as cotas antes de usar a razão para decisões.
+
 ## Modelo de segurança (padrões)
 
 Codex como usuário sem privilégio (`aao`), `workspace-write` **sem rede**; `danger-full-access` só com

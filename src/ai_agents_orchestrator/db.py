@@ -47,6 +47,13 @@ class Estado:
               id INTEGER PRIMARY KEY AUTOINCREMENT, quando REAL NOT NULL, tipo TEXT NOT NULL,
               motor TEXT NOT NULL, segundos REAL NOT NULL DEFAULT 0, ok INTEGER NOT NULL DEFAULT 1, ref TEXT);
             """)
+            cols = {r["name"] for r in self.c.execute("PRAGMA table_info(execucoes)")}
+            for nome, tipo in (("tokens_in", "INTEGER NOT NULL DEFAULT 0"),
+                               ("tokens_out", "INTEGER NOT NULL DEFAULT 0"), ("usage_key", "TEXT")):
+                if nome not in cols:
+                    self.c.execute(f"ALTER TABLE execucoes ADD COLUMN {nome} {tipo}")
+            self.c.execute("CREATE UNIQUE INDEX IF NOT EXISTS execucoes_usage ON execucoes(usage_key)")
+            self.c.execute("CREATE INDEX IF NOT EXISTS execucoes_quando ON execucoes(quando)")
         try:
             self.caminho.chmod(0o600)
         except OSError:
@@ -121,10 +128,25 @@ class Estado:
             self.c.execute("DELETE FROM acoes WHERE expira < ?", (agora - 3600,))
 
     # ---- runs
-    def registrar_execucao(self, tipo: str, motor: str, segundos: float, ok: bool, ref: str = "", agora: float | None = None) -> None:
+    def registrar_execucao(self, tipo: str, motor: str, segundos: float, ok: bool, ref: str = "", agora: float | None = None,
+                           *, tokens_in: int = 0, tokens_out: int = 0, usage_key: str | None = None) -> None:
         with self._lock:
-            self.c.execute("INSERT INTO execucoes(quando,tipo,motor,segundos,ok,ref) VALUES(?,?,?,?,?,?)",
-                           (agora if agora is not None else time.time(), tipo, motor, segundos, int(ok), ref))
+            self.c.execute("""INSERT INTO execucoes(quando,tipo,motor,segundos,ok,ref,tokens_in,tokens_out,usage_key)
+                           VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(usage_key) DO UPDATE SET
+                           tokens_in=MAX(tokens_in,excluded.tokens_in), tokens_out=MAX(tokens_out,excluded.tokens_out)""",
+                           (agora if agora is not None else time.time(), tipo, motor, segundos, int(ok), ref,
+                            tokens_in, tokens_out, usage_key))
+
+    def tokens_entre(self, desde: float, ate: float) -> dict:
+        with self._lock:
+            rows = self.c.execute("""SELECT motor,SUM(tokens_in) AS tokens_in,SUM(tokens_out) AS tokens_out
+                                   FROM execucoes WHERE quando>=? AND quando<=? GROUP BY motor""", (desde, ate)).fetchall()
+        return {r["motor"]: {k: r[k] for k in ("tokens_in", "tokens_out")} for r in rows}
+
+    def ultimas_execucoes(self, limite: int = 10) -> list[dict]:
+        with self._lock:
+            return [dict(r) for r in self.c.execute("""SELECT id,quando,tipo,motor,ref,tokens_in,tokens_out
+                                                    FROM execucoes ORDER BY id DESC LIMIT ?""", (limite,))]
 
     def execucoes_desde(self, desde: float, tipo: str | None = None) -> list[sqlite3.Row]:
         with self._lock:
@@ -176,7 +198,7 @@ class Quadro:
                 self.c.execute("ALTER TABLE tarefas ADD COLUMN origem TEXT NOT NULL DEFAULT 'claude'")
             for nome, tipo in (("claude_thread_id", "TEXT"), ("motor_execucao", "TEXT"),
                                ("retomada", "TEXT"), ("prioridade", "INTEGER NOT NULL DEFAULT 0"),
-                               ("retomadas", "INTEGER NOT NULL DEFAULT 0")):
+                               ("retomadas", "INTEGER NOT NULL DEFAULT 0"), ("diffstat", "TEXT")):
                 if nome not in cols:
                     self.c.execute(f"ALTER TABLE tarefas ADD COLUMN {nome} {tipo}")
             self.c.execute("UPDATE tarefas SET origem='claude' WHERE origem IS NULL OR origem=''")

@@ -33,7 +33,7 @@ class Plugin(unittest.TestCase):
 
     def test_hooks_chamam_comandos_que_o_cli_conhece(self):
         hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
-        self.assertEqual(set(hooks), {"StopFailure", "UserPromptSubmit", "SessionStart"})
+        self.assertEqual(set(hooks), {"StopFailure", "UserPromptSubmit", "SessionStart", "Stop"})
         self.assertEqual(hooks["StopFailure"][0]["matcher"], "rate_limit")
         for evento, grupos in hooks.items():
             for g in grupos:

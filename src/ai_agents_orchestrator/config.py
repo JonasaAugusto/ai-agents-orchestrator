@@ -107,6 +107,18 @@ class Config:
     claude_sonda_minutos: int = 15
     claude_limite_padrao_min: int = 30
     claude_dev_fallback: bool = False  # opt-in: headless dev while Codex is limited
+    balance_enabled: bool = True
+    claude_tokens_5h: int = 0  # operator-calibrated quota; 0 means unknown, never unlimited
+    claude_tokens_7d: int = 0
+    codex_tokens_5h: int = 0  # fallback when account/rateLimits/read is unavailable
+    codex_tokens_7d: int = 0
+    balance_ratio_low: float = 0.7
+    balance_ratio_high: float = 1.4
+    balance_alert_high: float = 85.0
+    balance_alert_low: float = 50.0
+    balance_tasks_factor: float = 0.5
+    balance_refresh_seconds: int = 300
+    balance_max_age_seconds: int = 900
     orchestrator: str = "claude"  # coordinator; independent of the task engine
     botao_expira_seg: int = 600
     lembrete_min: int = 45
@@ -182,6 +194,14 @@ class Config:
 
 # TOML key (section.key) -> (Config attribute, type). The same keys can be set with AAO_<SECTION>_<KEY>.
 ENV_MAP: dict[str, tuple[str, type]] = {
+    "balance.enabled": ("balance_enabled", bool),
+    "balance.claude_tokens_5h": ("claude_tokens_5h", int), "balance.claude_tokens_7d": ("claude_tokens_7d", int),
+    "balance.codex_tokens_5h": ("codex_tokens_5h", int), "balance.codex_tokens_7d": ("codex_tokens_7d", int),
+    "balance.ratio_low": ("balance_ratio_low", float), "balance.ratio_high": ("balance_ratio_high", float),
+    "balance.alert_high_pct": ("balance_alert_high", float), "balance.alert_other_below_pct": ("balance_alert_low", float),
+    "balance.low_ratio_tasks_factor": ("balance_tasks_factor", float),
+    "balance.refresh_seconds": ("balance_refresh_seconds", int),
+    "balance.max_age_seconds": ("balance_max_age_seconds", int),
     "paths.state_dir": ("state_dir", Path), "paths.root_state_dir": ("root_state", Path),
     "paths.claude_transcripts": ("fonte_transcripts", Path), "paths.claude_memory": ("fonte_memoria", Path),
     "paths.claude_sessions": ("claude_sessions_dir", Path), "paths.rules_file": ("rules_file", Path),

@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-12
+
+### Usage measurement and balance
+
+- Persist input/output tokens for Codex completed turns and Claude headless runs through an additive, idempotent
+  SQLite migration. Status exposes recent execution counters and rolling 5-hour/7-day totals.
+- Add lightweight `aao claude-usage` and plugin Stop hook: hash API-message ids and import only counters from the
+  mirrored session tail, deduplicating streamed blocks and repeated hooks; accounting stores no conversation text.
+- Default `aao result` to `--short` (state, branch, stored diffstat, warnings and ten report lines); `--full` preserves
+  the complete record. `aao status --brief` prints five formatted lines including both usage windows and ratios.
+- Configurable `[balance]` quotas, target ratio, task-cap reduction, cached Codex account limits and asymmetric
+  channel alerts. Economic prompt guidance delegates review/test verification and routes auto development/review
+  to Codex. Low ratios allow direct Claude review with a reduced task cap; unknown quotas never invent percentages.
+- Doctor checks measurement configuration, quotas, schema, mirror and Stop hook. Document the token estimate's
+  coverage limitations and `tasks_per_hour`/`handoff_checks_per_day` as independent cost controls.
+- Bound the Codex account reader when a subprocess sends an incomplete line; no provider calls in hooks/status.
+
 ### Added
 
 - Persistent automatic usage-limit resumption, first-reset scheduling when both engines are limited, runtime

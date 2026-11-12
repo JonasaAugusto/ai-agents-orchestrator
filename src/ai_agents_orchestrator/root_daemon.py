@@ -362,6 +362,8 @@ def processar(cfg: Config, req: dict, peer_uid: int, uid_agente: int | None, cha
     if peer_uid not in (0, uid_agente):
         return {"ok": False, "erro": "uid not authorized"}
     op = req.get("op")
+    if op == "claude_usage":
+        return espelho.espelhar(cfg, com_repos=False, so_transcript=True, sessao=req.get("session_id"))
     if op == "espelhar":
         hook = req.get("hook") if isinstance(req.get("hook"), dict) else None
         return espelho.espelhar(cfg, hook_payload=hook, com_repos=bool(req.get("repos", True)),
@@ -471,6 +473,9 @@ class RootClient:
 
     def espelhar(self, hook: dict | None = None) -> dict:
         return self.chamar({"op": "espelhar", "hook": hook})
+
+    def espelhar_uso(self, sessao: str | None = None) -> dict:
+        return self.chamar({"op": "claude_usage", "session_id": sessao}, timeout=3)
 
     def espelhar_repo(self, repo: str) -> dict:
         """Refreshes only one repo's bare mirror (current GitHub state) before creating a workspace."""

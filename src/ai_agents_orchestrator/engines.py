@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import selectors
 import signal
 import subprocess
 import tempfile
@@ -15,6 +16,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import config
+from .medicao import contadores
 
 # ------------------------------------------------------------------ limit detection
 # Claude Code messages observed in real transcripts (2.1.x):
@@ -125,6 +127,8 @@ class Resultado:
     exit_code: int | None = None
     segundos: float = 0.0
     eventos: list = field(default_factory=list)
+    tokens_in: int = 0
+    tokens_out: int = 0
 
 
 def motivo_sinal(code: int) -> str:
@@ -354,6 +358,10 @@ class CodexRunner:
         tipo = ev.get("type", "")
         if tipo == "thread.started":
             res.thread_id = ev.get("thread_id")
+        elif tipo == "turn.completed":
+            entrada, saida = contadores(ev.get("usage"))
+            res.tokens_in += entrada
+            res.tokens_out += saida
         elif tipo in ("error", "turn.failed"):
             msg = ev.get("message") or (ev.get("error") or {}).get("message") or json.dumps(ev)[:300]
             res.erro = (res.erro + "\n" + str(msg)).strip()
@@ -421,6 +429,7 @@ class ClaudeRunner:
             texto = str(d.get("result", saida))
             res.erro = texto if d.get("is_error") else ""
             res.thread_id = d.get("session_id") or res.thread_id
+            res.tokens_in, res.tokens_out = contadores(d.get("usage"), claude=True)
         except ValueError:
             res.erro = err[-500:] if code else ""
         res.exit_code, res.timeout, res.texto = code, estourou, texto
@@ -446,32 +455,56 @@ def uso_codex(state_dir: Path, binario: str = "codex", timeout: float = 15.0) ->
             {"jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read"}]
     try:
         p = subprocess.Popen([binario, "app-server", "--stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, text=True, env=env_filhos(state_dir), start_new_session=True)
+                             stderr=subprocess.DEVNULL, env=env_filhos(state_dir), start_new_session=True)
     except OSError as e:
         return {"ok": False, "erro": type(e).__name__}
+    seletor = selectors.DefaultSelector()
     try:
         for m in msgs:
-            p.stdin.write(json.dumps(m) + "\n")  # type: ignore[union-attr]
+            p.stdin.write((json.dumps(m) + "\n").encode())  # type: ignore[union-attr]
         p.stdin.flush()  # type: ignore[union-attr]
-        fim = time.time() + timeout
-        while time.time() < fim:
-            linha = p.stdout.readline()  # type: ignore[union-attr]
-            if not linha:
+        seletor.register(p.stdout, selectors.EVENT_READ)
+        fim = time.monotonic() + timeout
+        buffer = b""
+        while True:
+            restante = fim - time.monotonic()
+            if restante <= 0 or not seletor.select(restante):
                 break
-            try:
-                d = json.loads(linha)
-            except ValueError:
-                continue
-            if d.get("id") == 2:
-                if "error" in d:
-                    return {"ok": False, "erro": str(d["error"].get("message", ""))[:200]}
-                return {"ok": True, **resumir_limites(d.get("result") or {})}
+            bloco = os.read(p.stdout.fileno(), 65536)
+            if not bloco:
+                break
+            buffer += bloco
+            if len(buffer) > 1024 * 1024:
+                return {"ok": False, "erro": "oversized usage response"}
+            while b"\n" in buffer:
+                linha, buffer = buffer.split(b"\n", 1)
+                try:
+                    d = json.loads(linha)
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and d.get("id") == 2:
+                    if "error" in d:
+                        return {"ok": False, "erro": "usage request rejected"}
+                    return {"ok": True, **resumir_limites(d.get("result") or {})}
         return {"ok": False, "erro": "no answer"}
+    except OSError:
+        return {"ok": False, "erro": "usage process unavailable"}
     finally:
+        seletor.close()
         try:
             os.killpg(p.pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             pass
+        try:
+            p.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            p.wait(timeout=1)
+        p.stdin.close()
+        p.stdout.close()
 
 
 def resumir_limites(r: dict) -> dict:
