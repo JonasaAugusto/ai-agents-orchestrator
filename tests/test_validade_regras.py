@@ -70,6 +70,11 @@ class ValidadeComando(unittest.TestCase):
 
 
 class ValidadeSnapshot(unittest.TestCase):
+    def setUp(self):
+        # the day boundary depends on the configured zone: pin UTC-3, whatever ran before
+        self.addCleanup(config.definir_fuso, config.nome_fuso())
+        config.definir_fuso("America/Montevideo")
+
     def test_snapshot_avisa_na_virada_do_dia_no_fuso_configurado(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(prompts, "regras_base", return_value=REGRAS):
             cfg = Config(state_dir=Path(tmp), repos={})

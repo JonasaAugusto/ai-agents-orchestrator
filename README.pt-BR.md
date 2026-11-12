@@ -399,7 +399,9 @@ lateral ao vivo (API em acesso antecipado do Claude Code, pode mudar):
 O limite do Claude e do Codex deve acabar porque o trabalho saiu, não por desperdício.
 
 - Codex: esforço padrão `medium`; `high`/`xhigh` só com motivo explícito (segurança, bug difícil), por tarefa com
-  `aao delegate --effort`. Uma tarefa do Codex por vez (`service.max_concurrent_codex = 1`), salvo se você optar por
+  `aao delegate --effort`. O padrão vem de `codex.default_effort` (validado contra os níveis do modelo);
+  precedência: `--effort` da tarefa > estado em tempo de execução (`/effort`) > `codex.default_effort` > padrão do Codex.
+  Uma tarefa do Codex por vez (`service.max_concurrent_codex = 1`), salvo se você optar por
   paralelo. Testes focados durante o trabalho, suíte completa uma vez no fim.
 - Claude: prefira subagentes novos com briefing curto (objetivo, arquivos, critérios de pronto) a fazer fork de uma
   conversa grande; cada fork relê todo o contexto e custa mais por tarefa.

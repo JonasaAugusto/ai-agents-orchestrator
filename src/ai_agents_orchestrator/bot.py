@@ -188,7 +188,7 @@ class Bot:
         modelo = self.estado.get("modelo")
         mods = self._cacheado("modelos", lambda: engines.modelos_codex(self.cfg.state_dir, self.cfg.codex_bin), bool)
         niveis = engines.niveis_effort(mods, modelo)
-        atual = self.estado.get("esforco") or "Codex default"
+        atual = self.s.esforco_atual(validar=False) or "Codex default"
         quando = f"Model: {modelo or 'Codex default'}. Current effort: {atual}."
         arg = arg.strip().lower()
         if arg:
@@ -215,7 +215,7 @@ class Bot:
             return self.s.editar(mid, cartao.cartao_erro(u.get("erro")), kb, html=True)
         self.estado.set("codex_uso_balance", {"quando": agora, "dados": u})
         self.s.alertar_balanceamento()
-        bot = {"modelo": self.estado.get("modelo") or "Codex default", "esforco": self.estado.get("esforco") or "Codex default",
+        bot = {"modelo": self.estado.get("modelo") or "Codex default", "esforco": self.s.esforco_atual(validar=False) or "Codex default",
                "acordadas": self.estado.contagem_dia("acordadas", self.s.hoje()), "teto": self.s.teto_acordadas(),
                "tarefas_hora": len(self.estado.execucoes_desde(agora - 3600, "tarefa")), "teto_tarefas": self.cfg.tarefas_por_hora}
         kb = self.s.botoes.teclado("usage", {}, [("Refresh", "atualizar")])

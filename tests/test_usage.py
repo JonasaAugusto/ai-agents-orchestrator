@@ -2,9 +2,11 @@ import unittest
 from datetime import datetime
 from unittest import mock
 
-from ai_agents_orchestrator import cartao, engines
-from ai_agents_orchestrator.config import fuso
-TZ = fuso()
+from zoneinfo import ZoneInfo
+
+from ai_agents_orchestrator import cartao, config, engines
+
+TZ = ZoneInfo("America/Montevideo")
 from tests.helpers import Base
 
 AGORA = datetime(2026, 11, 9, 16, 25, tzinfo=TZ).timestamp()
@@ -15,6 +17,11 @@ COMPLETO = {"ok": True, "plano": "plus", "primaria": {"usado_pct": 32.4, "duraca
 
 
 class Cartao(unittest.TestCase):
+    def setUp(self):
+        # the card renders local times: pin the zone the fixtures were built in, whatever ran before
+        self.addCleanup(config.definir_fuso, config.nome_fuso())
+        config.definir_fuso("America/Montevideo")
+
     def test_completo(self):
         t = cartao.cartao_usage(COMPLETO, AGORA, {"modelo": "gpt-x", "esforco": "high", "acordadas": 2, "teto": 6,
                                                    "tarefas_hora": 1, "teto_tarefas": 6})

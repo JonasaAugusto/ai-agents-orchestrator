@@ -147,6 +147,7 @@ class Config:
     # --- safety switches (safe defaults)
     codex_network: bool = False  # outbound network inside Codex's workspace-write sandbox
     codex_full_access: bool = False  # DANGER: danger-full-access (no sandbox). Explicit opt-in only.
+    codex_default_effort: str = "medium"  # used when neither --effort nor the runtime state sets one
     codex_full_access_read_only: bool = False  # with full_access: read-only phases (reviews) get full access too
     claude_wakeup: bool = False  # EXPERIMENTAL: post into the interactive Claude Code session socket
     claude_sessions_dir: Path = Path("/root/.claude/sessions")
@@ -245,6 +246,7 @@ ENV_MAP: dict[str, tuple[str, type]] = {
     "engines.codex_bin": ("codex_bin", str), "engines.claude_bin": ("claude_bin", str),
     "codex.network_access": ("codex_network", bool), "codex.full_access": ("codex_full_access", bool),
     "codex.full_access_read_only": ("codex_full_access_read_only", bool),
+    "codex.default_effort": ("codex_default_effort", str),
     "service.channel": ("channel", str), "whatsapp.accept_unofficial_risk": ("whatsapp_accept_risk", bool),
     "whatsapp.owner_number": ("whatsapp_owner", str), "whatsapp.max_messages_per_minute": ("whatsapp_max_per_minute", int),
     "telegram.token": ("token", str), "telegram.chat_id": ("chat_id", int),
@@ -358,6 +360,9 @@ def carregar(env: dict[str, str] | None = None, arquivo: Path | None = None) -> 
             c.claude_sonda_minutos = 60
         if "AAO_PATHS_CLAUDE_MEMORY" not in e and not (dados.get("paths") or {}).get("claude_memory"):
             c.fonte_memoria = c.fonte_transcripts / "memory"
+    c.codex_default_effort = (c.codex_default_effort or "").strip().lower()
+    if c.codex_default_effort not in ("low", "medium", "high", "xhigh", "max", "ultra"):
+        c.codex_default_effort = "medium"
     c.max_codex_simultaneos = max(1, c.max_codex_simultaneos)
     c.claude_sonda_minutos = max(1, c.claude_sonda_minutos)
     c.task_timeout = max(1, c.task_timeout)

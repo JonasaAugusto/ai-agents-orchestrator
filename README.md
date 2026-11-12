@@ -503,7 +503,9 @@ built on Claude Code's early-access function-hooks API, which may change between
 The limits of Claude and Codex should run out because work shipped, not because of waste.
 
 - Codex: default effort `medium`; `high`/`xhigh` only with an explicit reason (security, a hard bug), per task with
-  `aao delegate --effort`. One Codex task at a time (`service.max_concurrent_codex = 1`) unless you opt into parallel.
+  `aao delegate --effort`. The default comes from `codex.default_effort` (validated against the model's levels);
+  precedence: task `--effort` > runtime state (`/effort`) > `codex.default_effort` > Codex's own default.
+  One Codex task at a time (`service.max_concurrent_codex = 1`) unless you opt into parallel.
   Focused tests while working, the full suite once at the end.
 - Claude: prefer new subagents with a short briefing (objective, files, done criteria) over forking a large
   conversation; every fork rereads all context and costs more per task.

@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows
 - `aao delegate --model`, `--effort` (this task only) and `--wait` (waits and prints the short result; exit 0 on review/completed).
 
 ### Changed
+- New `codex.default_effort` (default `medium`, validated against the model's levels). Precedence: task `--effort` > runtime state > `codex.default_effort` > Codex default.
+- Tests: the zone-dependent tests (`Cartao`, snapshot day rollover) pin their time zone and `test_retomada` restores it, removing order-dependent failures in the full suite.
 - Spend policy (skill `spend-policy.md`, SKILL.md and both READMEs): Codex `medium` by default, one Codex task at a time, new short-briefing subagents instead of forking, at most 2 parallel on non-overlapping files; `balance.alert_high_pct` now defaults to 70 (was 85).
 - README: the lite Quickstart and the one-command install (`pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator`) are on the first screen; the comparison and the support policy moved to `docs/comparison.md` and `docs/support-policy.md` (with pt-BR copies).
 - The "Windows is not tested" text now matches the OS support table, the CI and 1.2.1; Python classifier is Beta.

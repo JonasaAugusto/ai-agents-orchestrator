@@ -287,10 +287,27 @@ class Servico:
             shas[repo] = sha
         return {"ok": True, "erro": None, "shas": shas}
 
+    def esforco_atual(self, validar: bool = True) -> str | None:
+        """Effort for tasks without --effort: runtime state > codex.default_effort (if the model accepts it) > Codex default."""
+        estado = self.estado.get("esforco")
+        if estado:
+            return estado
+        padrao = self.cfg.codex_default_effort
+        if not padrao:
+            return None
+        if not validar:
+            return padrao
+        agora = self.agora()
+        c = getattr(self, "_cat_modelos", None)
+        if not c or agora - c[0] > 600:
+            c = (agora, engines.modelos_codex(self.cfg.state_dir, self.cfg.codex_bin))
+            self._cat_modelos = c
+        return padrao if padrao in engines.niveis_effort(c[1], self.estado.get("modelo")) else None
+
     def snapshot(self, sandbox: str, *, sync: dict | None = None, envolvidos: list[str] | None = None, motor: str = "codex") -> dict:
         """Execution snapshot injected into EVERY prompt (time, SHA per repo, real capabilities, briefing age)."""
         snap = garantias.montar_snapshot(self.cfg, self.agora(), sandbox=sandbox, modelo=self.estado.get("modelo"),
-                                         esforco=self.estado.get("esforco"), motor=motor, briefing_texto=self.briefing_texto(),
+                                         esforco=self.esforco_atual(), motor=motor, briefing_texto=self.briefing_texto(),
                                          sincronizados=(sync or {}).get("shas"), envolvidos=envolvidos)
         snap["envolvidos"] = list(envolvidos or [])
         snap["sincronizados"] = dict((sync or {}).get("shas") or {})
@@ -441,7 +458,7 @@ class Servico:
                                      base=sessao["base"], agora_iso=datetime.fromtimestamp(self.agora(), config.fuso()).isoformat(timespec="minutes"),
                                      snapshot=snap["texto"])
         res = self.codex.executar(prompt, ws, "workspace-write", self.cfg.task_timeout, self.estado.get("modelo"),
-                                  resume=sessao.get("thread"), esforco=self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
+                                  resume=sessao.get("thread"), esforco=self.esforco_atual(), on_event=self.gravador_eventos(tid))
         self.registrar_resultado("conversa", "codex", res, str(tid))
         if res.thread_id:
             sessao["thread"] = res.thread_id
@@ -550,7 +567,7 @@ class Servico:
         prompt = prompts.prompt_conversa(texto, primeira=not thread, repos=repos, snapshot=snap["texto"],
                                          agora_iso=datetime.fromtimestamp(self.agora(), config.fuso()).isoformat(timespec="minutes"))
         res = self.codex.executar(prompt, self.cfg.mirror, "read-only", self.cfg.veredito_timeout,
-                                  self.estado.get("modelo"), resume=thread, esforco=self.estado.get("esforco"))
+                                  self.estado.get("modelo"), resume=thread, esforco=self.esforco_atual())
         self.registrar_resultado("conversa", "codex", res)
         if res.thread_id:
             self.estado.set("conversa_thread", res.thread_id)
@@ -911,13 +928,13 @@ class Servico:
                 prompt = prompt_para("codex")
                 res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, t.get("modelo") or self.estado.get("modelo"),
                                           resume=t.get("thread_id"),
-                                          esforco=t.get("esforco") or self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
+                                          esforco=t.get("esforco") or self.esforco_atual(), on_event=self.gravador_eventos(tid))
                 motor = "codex"
                 self.quadro.atualizar(tid, motor_execucao=motor)
         else:
             res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, t.get("modelo") or self.estado.get("modelo"),
                                       resume=t.get("thread_id"),
-                                      esforco=t.get("esforco") or self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
+                                      esforco=t.get("esforco") or self.esforco_atual(), on_event=self.gravador_eventos(tid))
             motor = "codex"
         self.registrar_resultado("tarefa", motor, res, str(tid))
         self.tarefa_atual = None
@@ -1113,7 +1130,7 @@ class Servico:
                                          agora_iso=datetime.fromtimestamp(self.agora(), config.fuso()).isoformat(timespec="minutes"))
         res = self.codex.executar(prompt, self.cfg.mirror, "read-only", self.cfg.veredito_timeout,
                                   self.estado.get("modelo"), schema=prompts.SCHEMA_CONTEXTO,
-                                  esforco=self.estado.get("esforco"))
+                                  esforco=self.esforco_atual())
         self.registrar_resultado("contexto", "codex", res)
         if res.limite:
             ate = res.limite.reset_epoch or int(self.agora() + 1800)
@@ -1448,7 +1465,7 @@ class Servico:
         return {"uso": self.balanceamento(), "execucoes": self.estado.ultimas_execucoes(),
                 "motor": self.estado.get("motor", "codex"), "orchestrator": self.cfg.orchestrator,
                 "retomada_agendada": self.agendamento(), "modelo": self.estado.get("modelo") or "Codex default",
-                "esforco": self.estado.get("esforco") or "Codex default",
+                "esforco": self.esforco_atual() or "Codex default",
                 "pausado": bool(self.estado.get("pausado", False)), "auto": self.auto(), "armado": self.armado(),
                 "tarefa_atual": self.tarefa_atual, "chat_em_execucao": self._conversa_lock.locked(), "fila": len(self.quadro.listar(("pendente",), "codex")),
                 "claude": ("limited until " + hora_br(cl.get("reset_epoch"))) if cl.get("ativo") else "ok",

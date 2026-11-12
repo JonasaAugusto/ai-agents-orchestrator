@@ -25,6 +25,7 @@ class Retomada(Base):
     def setUp(self):
         super().setUp()
         self.criar_repo()
+        self.addCleanup(config.definir_fuso, config.nome_fuso())
         config.definir_fuso("UTC")
         self.cfg.armado_flag.touch()
         self.claude = ClaudeFalso()
