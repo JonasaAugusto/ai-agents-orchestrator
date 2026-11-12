@@ -129,6 +129,98 @@ def publicar_base(cfg: Config, quadro: Quadro, root, tid: int, agora: float, apr
     return {"ok": True, **r}
 
 
+def _gh_real(args: list[str], cwd=None):
+    import subprocess
+    return subprocess.run(["gh", *args], cwd=cwd, capture_output=True, text=True, timeout=120, encoding="utf-8",
+                          errors="replace", stdin=subprocess.DEVNULL)
+
+
+def gh_disponivel(gh=None) -> str | None:
+    """None when the GitHub CLI exists and is logged in; otherwise a clear message. No side effects."""
+    import shutil
+    if gh is None:
+        if shutil.which("gh") is None:
+            return "gh (GitHub CLI) not found: install it from https://cli.github.com and run `gh auth login`"
+        gh = _gh_real
+    try:
+        r = gh(["auth", "status"])
+    except (OSError, ValueError):
+        return "gh (GitHub CLI) could not run: install it and run `gh auth login`"
+    except Exception:
+        return "gh (GitHub CLI) did not answer: run `gh auth status`"
+    if r.returncode != 0:
+        return "gh (GitHub CLI) is not logged in: run `gh auth login`"
+    return None
+
+
+def texto_pr(cfg: Config, t: dict, aprovacao: dict, arquivos: list[str]) -> tuple[str, str]:
+    """PR title and body: task id, commit, base and file names only. Never the conversation, the task description,
+    the Codex narrative or anything unmasked."""
+    titulo = f"Task #{t['id']}"
+    if t.get("origem") == "claude" and t.get("titulo"):
+        titulo = " ".join(sanitize.mascarar(str(t["titulo"]), dev=True).split())[:72] or titulo
+    linhas = [f"Opened by AI Agents Orchestrator for task #{t['id']}.", "",
+              f"- Commit: `{aprovacao['commit']}`", f"- Base: `{aprovacao['destino']}`",
+              f"- Branch: `{aprovacao['branch']}`", "", "Changed files:"]
+    linhas += [f"- `{a}`" for a in arquivos[:50]]
+    if len(arquivos) > 50:
+        linhas.append(f"- ... and {len(arquivos) - 50} more")
+    linhas += ["", "Review the diff before merging; nothing was merged by the orchestrator."]
+    return titulo, sanitize.mascarar("\n".join(linhas), dev=True)
+
+
+def abrir_pr(cfg: Config, quadro: Quadro, root, tid: int, agora: float, aprovacao: dict | None = None, gh=None) -> dict:
+    """`aao publish --pr`: pushes the approved agent/* commit as a branch (never force) and opens a pull request with
+    `gh`. Nothing is merged into the base. Fails before any side effect when `gh` is missing or logged out."""
+    t = quadro.ver(tid)
+    if not t or t["kind"] not in ("dev", "chat") or not t["branch"] or not t["workspace"]:
+        return {"ok": False, "erro": "task has no publishable branch"}
+    erro = gh_disponivel(gh)
+    if erro:
+        return {"ok": False, "erro": erro}
+    slug = str(cfg.repos.get(t["repo"], {}).get("github", ""))
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", slug):
+        return {"ok": False, "erro": "repo has no GitHub slug (set `github = \"owner/name\"` for it in config.toml)"}
+    try:
+        aprovacao = aprovacao if aprovacao is not None else aprovacao_publicacao(cfg, t)
+        if (aprovacao.get("tid") != tid or aprovacao.get("repo") != t["repo"] or
+                aprovacao.get("branch") != t["branch"] or not aprovacao.get("commit") or not aprovacao.get("destino")):
+            return {"ok": False, "erro": "approval does not match the task"}
+        branch, commit, ws = t["branch"], aprovacao["commit"], Path(t["workspace"])
+        if not workspace.repo_permitido(cfg, t["repo"]) or not branch.startswith("agent/"):
+            return {"ok": False, "erro": "pull request denied by the guards"}
+        if workspace.git(cfg, ["rev-parse", f"refs/heads/{branch}"], ws).stdout.strip() != commit:
+            return {"ok": False, "erro": "approved commit changed"}
+        base = workspace.base_do_repo(cfg, t["repo"])
+        if aprovacao["destino"] != base:
+            return {"ok": False, "erro": "approved destination changed"}
+        arquivos = [a for a in workspace.git(cfg, ["diff", "--name-only", f"{base}...{commit}"], ws,
+                                             check=False).stdout.splitlines() if a][:200]
+        titulo, corpo = texto_pr(cfg, t, aprovacao, arquivos)
+        empurrar = getattr(root, "push_pr", None)
+        r = (empurrar(t["repo"], tid, branch, commit=commit) if empurrar
+             else root.push_branch(t["repo"], tid, branch))
+        if not r.get("ok"):
+            return {"ok": False, "erro": str(r.get("erro"))}
+        if r.get("hash") and r["hash"] != commit and not r.get("local"):
+            return {"ok": False, "erro": "pushed commit differs from the approved commit"}
+    except workspace.GitErro as e:
+        return {"ok": False, "erro": str(e)}
+    runner = gh or _gh_real
+    try:
+        pr = runner(["pr", "create", "--repo", slug, "--base", base, "--head", branch, "--title", titulo,
+                     "--body", corpo])
+    except Exception as e:
+        return {"ok": False, "erro": f"branch {branch} pushed, but gh failed: " + sanitize.mascarar(str(e), dev=True)[-200:]}
+    if pr.returncode != 0:
+        return {"ok": False, "erro": f"branch {branch} pushed, but gh could not open the pull request: "
+                + sanitize.mascarar((pr.stderr or pr.stdout or "").strip(), dev=True)[-200:]}
+    url = (pr.stdout or "").strip().splitlines()[-1] if (pr.stdout or "").strip() else ""
+    quadro.atualizar(tid, publicado=json.dumps({"pr": url, "branch": branch, "commit": commit, "quando": agora}))
+    workspace.auditar(cfg, "pull-request", t["repo"], branch, commit)
+    return {"ok": True, "pr": url, "branch": branch, "commit": commit, "base": base}
+
+
 class Servico:
     def __init__(self, cfg: Config, estado: Estado, quadro: Quadro, tg: Canal | None, codex: engines.CodexRunner,
                  claude: engines.ClaudeRunner | None, root, relogio=time.time, sem_telegram: bool = False):

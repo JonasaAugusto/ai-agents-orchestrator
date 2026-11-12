@@ -19,7 +19,7 @@ from . import root_daemon
 from .bot import Bot
 from .config import CLI
 from .db import Estado, Quadro
-from .servico import Servico, publicar_base, aprovacao_publicacao
+from .servico import Servico, abrir_pr, aprovacao_publicacao, gh_disponivel, publicar_base
 
 FINAIS = ("em_revisao", "concluida", "bloqueada", "cancelada")
 ESTADOS_CLI = {"pendente": "pending", "em_andamento": "in progress", "em_revisao": "in review",
@@ -145,14 +145,14 @@ def _hook_prompt(cfg, evento: str) -> int:
 
 
 def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = None, root=None,
-              interativo: bool | None = None, entrada=input) -> int:
+              interativo: bool | None = None, entrada=input, pr: bool = False, gh=None) -> int:
     """Publishes (merge --no-ff into the base + push, via the root daemon) a task delegated by Claude. Root only, and
     only with the owner's confirmation typed in an interactive terminal (the task id). The `--approved-by-owner`
     flag is self-attested (an agent can pass it), so on its own it no longer publishes anything."""
     if cfg.mode == "lite":
         from .lite import lock
         with lock(cfg.state_dir / "publish-cli.lock"):
-            return _publicar_lite(cfg, tid, root=root, interativo=interativo, entrada=entrada)
+            return _publicar_lite(cfg, tid, root=root, interativo=interativo, entrada=entrada, pr=pr, gh=gh)
     if compat.euid() != 0:
         print("refused: must run as root")
         return 2
@@ -162,6 +162,9 @@ def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = 
         print("refused: publishing from the CLI needs the owner at an interactive terminal (type the task id to "
               "confirm). --approved-by-owner alone is not accepted; tasks from the chat use the [Publish] button.")
         return 2
+    if pr and (erro := gh_disponivel(gh)):
+        print("refused: " + erro)
+        return 1
     quadro = Quadro(cfg.db_quadro)
     t = quadro.ver(tid)
     if not t:
@@ -179,7 +182,7 @@ def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = 
         quadro.c.close()
         return 1
     try:
-        digitado = (entrada(f"Publish task #{tid}, commit {aprovacao.get('commit', 'unknown')}, "
+        digitado = (entrada(f"{'Open a pull request for' if pr else 'Publish'} task #{tid}, commit {aprovacao.get('commit', 'unknown')}, "
                            f"to {aprovacao.get('repo', 'unknown')}/{aprovacao.get('destino', 'unknown')}? "
                            "Type the task id to confirm: ")
                     or "").strip()
@@ -194,7 +197,8 @@ def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = 
         except OSError:
             print("publish key not readable"); return 1
         root = root_daemon.RootClient(str(cfg.root_socket), chave_hex=chave)
-    r = publicar_base(cfg, quadro, root, tid, time.time(), aprovacao)
+    r = (abrir_pr(cfg, quadro, root, tid, time.time(), aprovacao, gh) if pr
+         else publicar_base(cfg, quadro, root, tid, time.time(), aprovacao))
     # the service runs as another user: give it back any WAL files root may have created
     try:
         st = os.stat(cfg.db_quadro)
@@ -207,13 +211,16 @@ def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = 
     return _imprimir(r)
 
 
-def _publicar_lite(cfg, tid, *, root=None, interativo=None, entrada=input):
+def _publicar_lite(cfg, tid, *, root=None, interativo=None, entrada=input, pr=False, gh=None):
     from .lite import LocalBackend
     if interativo is None:
         interativo = sys.stdin.isatty() and sys.stdout.isatty()
     if not interativo:
         print("refused: aao publish requires an interactive terminal and ID SHA confirmation")
         return 2
+    if pr and (erro := gh_disponivel(gh)):
+        print("refused: " + erro)
+        return 1
     quadro = Quadro(cfg.db_quadro)
     try:
         t = quadro.ver(tid)
@@ -226,7 +233,7 @@ def _publicar_lite(cfg, tid, *, root=None, interativo=None, entrada=input):
             print("refused: task has no publishable commit")
             return 2
         try:
-            answer = entrada(f"Publish #{tid}, SHA {sha}, repo {approval['repo']}, base {approval['destino']}? "
+            answer = entrada(f"{'Open a PR for' if pr else 'Publish'} #{tid}, SHA {sha}, repo {approval['repo']}, base {approval['destino']}? "
                              f"Type {tid} {sha}: ").strip()
         except (EOFError, KeyboardInterrupt):
             answer = ""
@@ -236,7 +243,8 @@ def _publicar_lite(cfg, tid, *, root=None, interativo=None, entrada=input):
         backend = root or LocalBackend(cfg)
         backend.approved_cli = True
         try:
-            return _imprimir(publicar_base(cfg, quadro, backend, tid, time.time(), approval))
+            return _imprimir(abrir_pr(cfg, quadro, backend, tid, time.time(), approval, gh) if pr
+                             else publicar_base(cfg, quadro, backend, tid, time.time(), approval))
         finally:
             backend.approved_cli = False
     except workspace.GitErro as e:
@@ -429,6 +437,8 @@ def parser() -> argparse.ArgumentParser:
     rv.add_argument("--title", "--titulo", dest="titulo")
     pb = _sub(sp, "publish", "publicar", help="merge + push a reviewed task (interactive approval; lite: ID and full SHA)")
     pb.add_argument("id", type=int)
+    pb.add_argument("--pr", action="store_true",
+                    help="push the agent/* branch and open a pull request with gh instead of merging into the base")
     pb.add_argument("--approved-by-owner", "--autorizado-pelo-dono", dest="autorizado", action="store_true",
                     help="deprecated, ignored: the owner must confirm interactively")
     _sub(sp, "mcp", help="run a minimal MCP server on stdio (delegate, status, result, review; never publishes)")
@@ -562,7 +572,7 @@ def main(argv=None) -> int:
         from . import mcp
         return mcp.serve(lambda req: chamar(cfg, req))
     if cmd == "publish":
-        return _publicar(cfg, a.id, a.autorizado)
+        return _publicar(cfg, a.id, a.autorizado, pr=a.pr)
     if cmd == "wait":
         r = chamar(cfg, {"cmd": "esperar", "id": a.id, "timeout": max(0, a.timeout)},
                    timeout=a.timeout + 5 if a.timeout > 0 else None)

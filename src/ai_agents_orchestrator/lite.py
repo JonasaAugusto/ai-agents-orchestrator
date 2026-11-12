@@ -249,6 +249,29 @@ class LocalBackend:
         return {"ok": True, "local": True, "hash": workspace.git(self.cfg,
                 ["rev-parse", f"refs/heads/{branch}"], self.cfg.workspaces / repo / str(tid)).stdout.strip()}
 
+    def push_pr(self, repo, tid, branch, *, commit):
+        """Pushes exactly the approved commit as `branch` (plain push: never force, never a tag)."""
+        if not self.approved_cli:
+            return {"ok": False, "erro": "lite: run aao publish interactively"}
+        try:
+            url = self._url(repo)
+            if (not re.fullmatch(r"agent/[A-Za-z0-9._/-]+", branch) or ".." in branch
+                    or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit)):
+                raise workspace.GitErro("invalid approved branch or commit")
+            ws = self.cfg.workspaces / repo / str(int(tid))
+            with lock(self.cfg.state_dir / "publish.lock"):
+                with tempfile.TemporaryDirectory(prefix="publish-", dir=self.cfg.spool) as temp:
+                    gd = Path(temp) / "objects.git"
+                    self._git(["init", "--bare", "-q", str(gd)])
+                    with gitseguro.repositorio_isolado(ws / ".git") as source:
+                        self._git(["fetch", "--no-tags", str(source), f"refs/heads/{branch}:refs/heads/candidate"], gd)
+                    if self._git(["rev-parse", "refs/heads/candidate"], gd) != commit:
+                        raise workspace.GitErro("approved commit changed")
+                    self._git(["push", "--no-tags", url, f"{commit}:refs/heads/{branch}"], gd)
+            return {"ok": True, "hash": commit}
+        except (workspace.GitErro, OSError, ValueError, subprocess.TimeoutExpired) as e:
+            return {"ok": False, "erro": sanitize.mascarar(str(e), dev=True)}
+
     def push_base(self, repo, tid, branch, *, commit, destino, agora=None):
         if not self.approved_cli:
             return {"ok": False, "erro": "lite: run aao publish interactively"}

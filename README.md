@@ -83,6 +83,13 @@ remote updates fail safely. Agent branches remain local until approval; local-on
 repositories are delivered as workspace branches and patches for manual integration.
 This command publishes Git history, not a deployment.
 
+Prefer a review on GitHub? `aao publish <id> --pr` does not merge: after the same
+confirmation it pushes the approved `agent/*` commit as a branch (never force) and opens
+a pull request with the GitHub CLI (`gh`, logged in with `gh auth login`). Without `gh`
+or a login it fails with a clear message before pushing anything. The PR title and body
+carry only the task id, SHA, base and changed file names: no secrets, no conversation.
+The repository needs `github = "owner/name"` in `config.toml`. Works in lite and full mode.
+
 The generated config has top-level `mode = "lite"`. It defaults to
 `~/.config/ai-agents-orchestrator/config.toml` (`XDG_CONFIG_HOME` supported); state
 defaults to `~/.local/state/ai-agents-orchestrator` (`XDG_STATE_HOME` supported).

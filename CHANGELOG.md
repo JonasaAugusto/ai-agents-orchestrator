@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - `aao mcp`: minimal MCP server on stdio (standard library only) with `delegate` (including `model`/`effort`), `status`, `result` and `review`. It never publishes; publishing stays a human approval in the CLI. Registration: `claude mcp add aao -- aao mcp`.
 - `lite.transcripts_project` (or `AAO_LITE_TRANSCRIPTS_PROJECT`): names the project whose Claude Code transcripts the lite mirror reads, instead of relying on the directory where `aao serve` runs. Accepts a project path or the encoded folder name. `aao setup` asks for it and `aao doctor` reports a `transcripts project` check with the exact fix.
+- `aao publish <id> --pr`: pushes the approved `agent/*` SHA (never force) and opens a pull request with `gh` instead of merging into the base; same interactive confirmation, lite and full mode; fails before any push when `gh` is missing or logged out; the PR text has no secrets or conversation.
 
 ### Fixed
 - `examples/offline_relay.py` builds its disposable source repository with `git add`/`git commit` instead of `git fast-import`, inherits `PATH` (the old minimal `PATH` hid git on Windows) and writes bytes as-is; the test now runs on Windows too.

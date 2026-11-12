@@ -74,6 +74,13 @@ push sem force; conflitos e avanço concorrente do remoto impedem o envio. As br
 dos agentes ficam locais até a aprovação. Repositórios somente locais entregam branch
 e patch para integração manual. O comando publica histórico Git, não faz deploy.
 
+Prefere revisar no GitHub? `aao publish <id> --pr` não integra: após a mesma confirmação
+empurra o commit aprovado de `agent/*` como branch (nunca com force) e abre um pull
+request pelo GitHub CLI (`gh`, com `gh auth login`). Sem `gh` ou sem login, falha com
+mensagem clara antes de enviar qualquer coisa. Título e corpo do PR levam só o id da
+tarefa, o SHA, a base e os nomes dos arquivos: sem segredos nem conversa. O repositório
+precisa de `github = "owner/name"` no `config.toml`. Vale no modo lite e no completo.
+
 O arquivo gerado contém `mode = "lite"` no topo. Padrões:
 `~/.config/ai-agents-orchestrator/config.toml` e
 `~/.local/state/ai-agents-orchestrator`, respeitando `XDG_CONFIG_HOME` e `XDG_STATE_HOME`.
