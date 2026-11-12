@@ -71,11 +71,17 @@ class LocalBackend:
             raise workspace.GitErro(sanitize.mascarar(r.stderr or r.stdout, dev=True)[-300:])
         return r.stdout.strip()
 
+    def _github_url(self, gh: str) -> str:
+        # SSH só por escolha explícita (publish.push_url_scheme = "ssh"): quem usa chave em vez de token HTTPS.
+        if self.cfg.push_url_scheme == "ssh":
+            return f"git@github.com:{gh}.git"
+        return f"https://github.com/{gh}.git"
+
     def _url(self, repo: str) -> str:
         spec = self.cfg.repos.get(repo, {})
         gh = spec.get("github", "")
         if gh and gh in self.cfg.push_allowlist and re.fullmatch(r"[\w.-]+/[\w.-]+", gh):
-            return f"https://github.com/{gh}.git"
+            return self._github_url(gh)
         if self.cfg.permitir_url_local and spec.get("github_url"):
             return spec["github_url"]
         raise workspace.GitErro("repo not in publish.push_allowlist")
@@ -97,7 +103,7 @@ class LocalBackend:
                 if gh:
                     if not re.fullmatch(r"[\w.-]+/[\w.-]+", gh):
                         raise workspace.GitErro("invalid github repo")
-                    self._git(["fetch", "--no-tags", f"https://github.com/{gh}.git",
+                    self._git(["fetch", "--no-tags", self._github_url(gh),
                                "+refs/heads/*:refs/heads/*"], dst)
                 else:
                     src = Path(espelho._fonte_repo(spec) or "")
@@ -109,7 +115,7 @@ class LocalBackend:
                 self._git(["symbolic-ref", "HEAD", f"refs/heads/{base}"], dst)
                 self._git(["rev-parse", f"refs/heads/{base}"], dst)
                 # Lite task branches stay local, but cross-review must still see them.
-                for source in (self.cfg.workspaces / repo).glob("*/.git"):
+                for source in self._workspaces_recentes(repo):
                     with gitseguro.repositorio_isolado(source) as private:
                         self._git(["fetch", "--no-tags", str(private),
                                    "+refs/heads/agent/*:refs/heads/agent/*"], dst)
@@ -117,6 +123,22 @@ class LocalBackend:
             return {"ok": True, "status": status}
         except (workspace.GitErro, OSError, subprocess.TimeoutExpired) as e:
             return {"ok": False, "erro": sanitize.mascarar(str(e), dev=True)}
+
+    MAX_WORKSPACES_ESPELHADOS = 20
+
+    def _workspaces_recentes(self, repo: str) -> list[Path]:
+        """Só os workspaces mais recentes entram no espelho: o custo não cresce com o histórico de tarefas."""
+        fontes = [p for p in (self.cfg.workspaces / repo).glob("*/.git") if p.exists()]
+        fontes.sort(key=lambda p: p.stat().st_mtime_ns, reverse=True)
+        return fontes[:self.MAX_WORKSPACES_ESPELHADOS]
+
+    def _pasta_do_projeto(self) -> Path:
+        raiz = self.cfg.fonte_transcripts
+        atual = raiz / re.sub(r"[^A-Za-z0-9]", "-", os.getcwd())
+        if atual.is_dir():
+            return atual
+        # fonte_transcripts já aponta para a pasta de um projeto (jsonl direto, sem subpastas de projeto).
+        return raiz if any(raiz.glob("*.jsonl")) else atual
 
     def _mirror(self, hook=None, session=None, usage=False):
         cfg = self.cfg
@@ -127,7 +149,9 @@ class LocalBackend:
                     return {"ok": False, "erro": "invalid session id"}
                 candidates = list(cfg.fonte_transcripts.rglob(session + ".jsonl"))
             else:
-                candidates = list(cfg.fonte_transcripts.rglob("*.jsonl"))
+                # Sem sessão do hook, só o projeto em uso (diretório do cwd) ou uma pasta de projeto única;
+                # nunca a árvore inteira de ~/.claude/projects, que mistura outros projetos.
+                candidates = list(self._pasta_do_projeto().glob("*.jsonl"))
             candidates = [p for p in candidates if p.is_file() and not p.is_symlink()
                           and p.resolve().is_relative_to(cfg.fonte_transcripts.resolve())]
             if candidates:
@@ -201,4 +225,8 @@ class LocalBackend:
                     self._git(["push", "--no-tags", url, f"{merged}:refs/heads/{destino}"], gd)
             return {"ok": True, "hash": merged, "base": destino}
         except (workspace.GitErro, OSError, ValueError, subprocess.TimeoutExpired) as e:
-            return {"ok": False, "erro": sanitize.mascarar(str(e), dev=True)}
+            msg = sanitize.mascarar(str(e), dev=True)
+            if re.search(r"Authentication failed|Permission denied|could not read Username|publickey", msg, re.I):
+                msg += (" | git has no usable credential for this repository: configure your git credential helper"
+                        " or set publish.push_url_scheme = \"ssh\" in config.toml")
+            return {"ok": False, "erro": msg}

@@ -909,15 +909,15 @@ class Servico:
                     self.notificar_tarefa(t, "Claude hit its limit, using Codex.")
                 # Codex may not share Claude's context; select its own full/delta prompt.
                 prompt = prompt_para("codex")
-                res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, self.estado.get("modelo"),
+                res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, t.get("modelo") or self.estado.get("modelo"),
                                           resume=t.get("thread_id"),
-                                          esforco=self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
+                                          esforco=t.get("esforco") or self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
                 motor = "codex"
                 self.quadro.atualizar(tid, motor_execucao=motor)
         else:
-            res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, self.estado.get("modelo"),
+            res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, t.get("modelo") or self.estado.get("modelo"),
                                       resume=t.get("thread_id"),
-                                      esforco=self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
+                                      esforco=t.get("esforco") or self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
             motor = "codex"
         self.registrar_resultado("tarefa", motor, res, str(tid))
         self.tarefa_atual = None
@@ -1328,15 +1328,22 @@ class Servico:
 
     # ------------------------------------------------------------ board / commands (CLI and bot)
     def delegar(self, repo: str, titulo: str, descricao: str = "", arquivos: list[str] | None = None, briefing: str | None = None,
-                dono: str = "codex", origem: str = "claude", prioridade: int = 0) -> dict:
+                dono: str = "codex", origem: str = "claude", prioridade: int = 0,
+                modelo: str | None = None, esforco: str | None = None) -> dict:
         if repo not in self.cfg.repos:
             return {"ok": False, "erro": f"repo not allowed: {repo}"}
+        if modelo and not re.fullmatch(r"[A-Za-z0-9][\w.-]{0,63}", modelo):
+            return {"ok": False, "erro": "invalid model name"}
+        if esforco and esforco not in ("low", "medium", "high", "xhigh", "max", "ultra"):
+            return {"ok": False, "erro": "invalid effort"}
         conf = self.quadro.conflitos(None, repo, arquivos or [])
         t = self.quadro.criar(titulo, descricao, repo, dono, origem, arquivos or [], prioridade=prioridade)
         if briefing:
             d = self.cfg.para_codex / "tarefas"
             d.mkdir(parents=True, exist_ok=True)
             (d / f"{t['id']}.md").write_text(briefing, encoding="utf-8")
+        if modelo or esforco:
+            self.quadro.atualizar(t["id"], modelo=modelo or None, esforco=esforco or None)
         aviso = None
         if conf:
             aviso = "File overlap with tasks in progress: " + ", ".join(f"#{c['id']}" for c in conf) + " (waits for the lock)"
@@ -1379,7 +1386,8 @@ class Servico:
             return self.esperar_tarefa(int(req.get("id", 0)), float(req.get("timeout", 0)))
         if c == "delegar":
             return self.delegar(req.get("repo", ""), req.get("titulo", ""), req.get("descricao", ""), req.get("arquivos") or [],
-                                req.get("briefing"), origem="claude", prioridade=int(req.get("prioridade", 0)))
+                                req.get("briefing"), origem="claude", prioridade=int(req.get("prioridade", 0)),
+                                modelo=req.get("modelo"), esforco=req.get("esforco"))
         if c == "listar":
             ts = self.quadro.listar(tuple(req["estados"]) if req.get("estados") else None, req.get("dono"), int(req.get("limite", 30)))
             return {"ok": True, "tarefas": [self._resumo(t) for t in ts]}
@@ -1504,6 +1512,11 @@ class Servico:
                     return {"ok": False, "erro": "timeout"}
                 self.quadro.mudou.wait(restante)
 
+    def _token_valido_no_inicio(self, inicio: bytes) -> bool:
+        import secrets
+        m = re.match(rb'\{"token": "([0-9a-f]{64})"', inicio)
+        return bool(m and self._ipc_token and secrets.compare_digest(m[1].decode(), self._ipc_token))
+
     def _atender_socket(self, c) -> None:
         try:
             with c:
@@ -1513,11 +1526,18 @@ class Servico:
                     if uid not in (0, os.getuid()):
                         return
                 dados = b""
+                autenticado = not self.cfg.use_tcp
                 while not dados.endswith(b"\n") and len(dados) < 2_000_000:
                     p = c.recv(65536)
                     if not p:
                         break
                     dados += p
+                    if not autenticado and (len(dados) >= 160 or dados.endswith(b"\n")):
+                        # TCP local: o token vem primeiro no JSON e é conferido antes de ler o corpo.
+                        if not self._token_valido_no_inicio(dados[:4096]):
+                            c.sendall((json.dumps({"ok": False, "erro": "local authentication failed"}) + "\n").encode())
+                            return
+                        autenticado = True
                 try:
                     req = json.loads(dados.decode())
                     if not isinstance(req, dict):

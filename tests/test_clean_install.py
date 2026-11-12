@@ -42,6 +42,14 @@ class UnattendedSetup(unittest.TestCase):
         self.assertEqual((self.dest / "config.toml").stat().st_mode & 0o777, 0o600)
         self.assertEqual({p.name for p in self.dest.iterdir()}, {"config.toml"})
 
+    def test_windows_path_needs_neither_pwd_nor_posix_directory_flags(self):
+        # Em Windows nativo não existem `pwd`, os.geteuid, O_DIRECTORY nem O_NOFOLLOW.
+        with mock.patch.dict("sys.modules", {"pwd": None}), mock.patch.object(assistente.compat, "WINDOWS", True), \
+                mock.patch.object(assistente.compat, "private") as private:
+            self.assertEqual(self.setup_cli("--output-dir", str(self.dest)), 0)
+        private.assert_called()
+        self.assertTrue((self.dest / "config.toml").is_file())
+
     def test_output_directory_required_no_default_write(self):
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit) as raised:

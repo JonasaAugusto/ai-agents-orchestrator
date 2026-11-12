@@ -200,7 +200,8 @@ class Quadro:
                 self.c.execute("ALTER TABLE tarefas ADD COLUMN origem TEXT NOT NULL DEFAULT 'claude'")
             for nome, tipo in (("claude_thread_id", "TEXT"), ("motor_execucao", "TEXT"),
                                ("retomada", "TEXT"), ("prioridade", "INTEGER NOT NULL DEFAULT 0"),
-                               ("retomadas", "INTEGER NOT NULL DEFAULT 0"), ("diffstat", "TEXT")):
+                               ("retomadas", "INTEGER NOT NULL DEFAULT 0"), ("diffstat", "TEXT"),
+                               ("modelo", "TEXT"), ("esforco", "TEXT")):
                 if nome not in cols:
                     self.c.execute(f"ALTER TABLE tarefas ADD COLUMN {nome} {tipo}")
             self.c.execute("UPDATE tarefas SET origem='claude' WHERE origem IS NULL OR origem=''")

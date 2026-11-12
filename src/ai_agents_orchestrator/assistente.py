@@ -18,7 +18,7 @@ import re
 import secrets
 from pathlib import Path
 
-from . import compat, config, doctor
+from . import __version__, compat, config, doctor
 from .config import CLI
 
 AVISO_SEM_CANAL = doctor.AVISO_SEM_CANAL
@@ -97,10 +97,30 @@ class Assistente:
             return
         code, _ = self.amb.rodar([cfg.claude_bin, "auth", "status"], env=None)
         self.saida("Claude Code login: " + ("ok" if code == 0 else "not confirmed; run claude auth login"))
+        # O plugin só é (re)instalado quando falta ou mudou de versão, e só com a confirmação da pessoa.
+        marca = cfg.state_dir / "plugin-instalado"
+        try:
+            instalado = marca.read_text(encoding="utf-8").strip()
+        except OSError:
+            instalado = ""
+        if instalado == __version__:
+            self.saida(f"Claude plugin already installed ({__version__}); nothing changed.")
+            return
+        if not self.sim("Install/update the Claude Code plugin for your user (claude plugin install --scope user)?", True):
+            self.saida("Plugin not installed; rerun aao setup whenever you want it.")
+            return
+        ok = True
         for cmd in ([cfg.claude_bin, "plugin", "marketplace", "add", "JonasaAugusto/ai-agents-orchestrator"],
                     [cfg.claude_bin, "plugin", "install", "ai-agents-orchestrator@ai-agents-orchestrator", "--scope", "user"]):
             code, _ = self.amb.rodar(cmd, timeout=120)
+            ok = ok and code == 0
             self.saida("Claude plugin " + ("ready" if code == 0 else "command failed; retry aao setup after checking Claude Code"))
+        if ok:
+            try:
+                marca.parent.mkdir(parents=True, exist_ok=True)
+                marca.write_text(__version__, encoding="utf-8")
+            except OSError:
+                pass
 
     def pergunta(self, texto: str, padrao: str = "", valida=None) -> str:
         while True:
@@ -237,8 +257,6 @@ class Assistente:
 
 def nao_interativo(destino: Path, fonte: Path | None = None) -> int:
     """Write a local evaluation config only; never infer a production path or create credentials."""
-    import pwd
-
     # Check before resolve(), otherwise an existing symlink would be silently followed.
     if destino.is_symlink() or (destino.exists() and (not destino.is_dir() or any(destino.iterdir()))):
         print("setup refused: --output-dir must be a new or empty directory, not a symlink")
@@ -249,7 +267,11 @@ def nao_interativo(destino: Path, fonte: Path | None = None) -> int:
         print("setup refused: --repo-source must be a local Git checkout")
         return 1
     destino.mkdir(parents=True, exist_ok=True, mode=0o700)
-    usuario = pwd.getpwuid(os.geteuid()).pw_name
+    if compat.WINDOWS:
+        usuario = getpass.getuser()
+    else:
+        import pwd
+        usuario = pwd.getpwuid(os.geteuid()).pw_name
     texto = gerar_toml({"channel": "none", "user": usuario, "timezone": "UTC",
                         "state_dir": str(destino / "state"), "claude_transcripts": str(destino / "transcripts"),
                         "allowlist": [], "repos": {"demo": {"source": str(fonte), "base_branch": "main", "local": True}}
@@ -262,23 +284,34 @@ def nao_interativo(destino: Path, fonte: Path | None = None) -> int:
     texto = texto.replace("[publish]\n", "[publish]\n" +
                           f"manifest = {_toml_str(str(destino / 'publish.json'))}\n" +
                           f"key_file = {_toml_str(str(destino / 'publish.key'))}\n")
-    # This evaluation mode may run in CI as root. Never truncate or replace a
-    # file inserted after the empty-directory check, and anchor writes to the fd.
-    try:
-        directory = os.open(destino, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    if compat.WINDOWS:
+        # Sem uid POSIX nem O_DIRECTORY/O_NOFOLLOW: a pasta está vazia e foi criada agora; restringe a DACL e cria exclusivo.
         try:
-            st = os.fstat(directory)
-            if st.st_uid != os.geteuid() or st.st_mode & 0o022:
-                print("setup refused: --output-dir must be owned by the current user and not writable by group/others")
-                return 1
-            fd = os.open("config.toml", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            compat.private(destino)
+            with open(destino / "config.toml", "x", encoding="utf-8") as stream:
                 stream.write(texto)
-        finally:
-            os.close(directory)
-    except OSError:
-        print("setup refused: could not exclusively create config.toml; existing files were preserved")
-        return 1
+            compat.private(destino / "config.toml")
+        except OSError:
+            print("setup refused: could not exclusively create config.toml; existing files were preserved")
+            return 1
+    else:
+        # This evaluation mode may run in CI as root. Never truncate or replace a
+        # file inserted after the empty-directory check, and anchor writes to the fd.
+        try:
+            directory = os.open(destino, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                st = os.fstat(directory)
+                if st.st_uid != os.geteuid() or st.st_mode & 0o022:
+                    print("setup refused: --output-dir must be owned by the current user and not writable by group/others")
+                    return 1
+                fd = os.open("config.toml", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    stream.write(texto)
+            finally:
+                os.close(directory)
+        except OSError:
+            print("setup refused: could not exclusively create config.toml; existing files were preserved")
+            return 1
     print("Created isolated config.toml (0600); channel=none, sandbox=workspace-write, publishing disabled.")
     print("No login, user, secret, service or plugin installation was performed. Run aao doctor with AAO_CONFIG.")
     return 0

@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `aao setup --non-interactive` works on native Windows (no `pwd`, `geteuid`, `O_DIRECTORY` or `O_NOFOLLOW`); CI now runs it on Windows.
+- Lite transcript mirror without a hook session reads only the current project's folder, never the whole `~/.claude/projects` tree.
+- Local TCP transport checks the token in the first bytes (the CLI sends it first in the JSON) before reading the body, so an unauthenticated local process cannot hold the connection slots.
+- Lite mirror fetches only the 20 most recent task workspaces instead of every workspace ever created.
+- `aao doctor` in lite reports a stopped service as a warning ("run aao serve") instead of a failure, and its repository fix no longer mentions the root daemon.
+
+### Changed
+
+- The wizard asks before installing the Claude Code plugin and reinstalls only when the package version changes.
+- Lite probes Claude every 60 minutes by default (`claude.probe_minutes` still overrides it).
+- CI actions in the lite job are pinned by SHA; Dependabot keeps GitHub Actions current.
+
+### Added
+
+- `publish.push_url_scheme = "ssh"` uses `git@github.com:owner/repo.git` in lite; credential failures say what to configure.
+- `aao delegate --model`, `--effort` (this task only) and `--wait` (waits and prints the short result; exit 0 on review/completed).
+
 ## [1.2.1] - 2026-11-12
 
 ### Native Windows lite mode

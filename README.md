@@ -128,7 +128,7 @@ flowchart LR
 
 Usage limits keep tasks pending in SQLite. Codex resumes at `codex_limite.ate` using its saved thread and workspace.
 Claude's reset is read from the limit message; when no time is available, a headless probe runs every 15 minutes
-(`claude.probe_minutes`), if the service has a Claude login. The reset and next probe survive service/machine restarts.
+(`claude.probe_minutes`; hourly by default in lite, because the probe is a `claude -p` call that uses your own plan's quota), if the service has a Claude login. The reset and next probe survive service/machine restarts.
 The optional interactive wake-up delivers a fixed notice; Claude reads the report in `HANDOFF-PARA-CLAUDE.md`.
 
 If both engines are limited, the channel receives “Both at their limits; I resume at …”. An independent internal timer

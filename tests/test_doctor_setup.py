@@ -30,6 +30,8 @@ class AmbienteFalso(doctor.Ambiente):
             return (0, "Logged in using ChatGPT") if self.login_ok else (1, "Not logged in")
         if cmd[0] == "git" and "ls-remote" in cmd:
             return (0, "abc\tHEAD") if self.git_ok else (128, "fatal")
+        if "plugin" in cmd:
+            return 0, ""
         return 1, ""
 
     def usuario_existe(self, nome): return self.usuario
@@ -170,7 +172,7 @@ class Setup(unittest.TestCase):
         self.d = Path(self.tmp.name)
 
     def rodar(self, respostas, parear=None):
-        it = iter(["full", *respostas])
+        it = iter(["full", *respostas, "y", "y"])
         saida = []
         a = assistente.Assistente(entrada=lambda _p: next(it), saida=saida.append, config_file=self.d / "config.toml",
                                   env_file=self.d / "env", parear=parear, amb=AmbienteFalso())

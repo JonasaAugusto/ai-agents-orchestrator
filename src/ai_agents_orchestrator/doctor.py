@@ -269,8 +269,11 @@ def checar_repos(cfg: Config, amb: Ambiente) -> list[Item]:
                 itens.append(Item(f"repo {nome}", OK if not extra else AVISO, f"github {gh} reachable{extra}"))
             else:
                 itens.append(Item(f"repo {nome}", FALHA, f"cannot read github {gh}",
-                                  "Give the account that runs the root daemon read/write access (e.g. a git credential "
-                                  "helper with a fine-grained token limited to these repos), then retry."))
+                                  ("Give your user read/write access (git credential helper with a fine-grained token "
+                                   "limited to these repos, or publish.push_url_scheme = \"ssh\"), then retry."
+                                   if cfg.mode == "lite" else
+                                   "Give the account that runs the root daemon read/write access (e.g. a git credential "
+                                   "helper with a fine-grained token limited to these repos), then retry.")))
         elif spec.get("fonte") or spec.get("fonte_url") or spec.get("source"):
             fonte = spec.get("fonte") or spec.get("source") or spec.get("fonte_url")
             ok = str(fonte).startswith(("http://", "https://")) or amb.stat(Path(str(fonte))) is not None
@@ -366,7 +369,11 @@ def checar_runtime(cfg: Config, amb: Ambiente) -> list[Item]:
             ativo = amb.socket_ativo(caminho)
         fix = ("Run aao serve and check paths.socket." if cfg.mode == "lite" else
                "Ask the operator to check aao serve / aao root-daemon and their configured sockets.")
-        itens.append(Item(nome, OK if ativo else FALHA, "accepting connections" if ativo else "not accepting connections",
+        # Em lite o serviço ainda não está de pé logo após o setup: é a próxima etapa, não uma falha.
+        parado = AVISO if cfg.mode == "lite" else FALHA
+        itens.append(Item(nome, OK if ativo else parado,
+                          "accepting connections" if ativo else
+                          ("not running yet: run aao serve" if cfg.mode == "lite" else "not accepting connections"),
                           fix if not ativo else ""))
     existe = amb.stat(cfg.para_codex / "BRIEFING.md") is not None
     itens.append(Item("live briefing", OK if existe else AVISO, "found" if existe else "BRIEFING.md missing",

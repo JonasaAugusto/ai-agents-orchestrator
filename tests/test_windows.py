@@ -124,6 +124,22 @@ class TcpRuntime(unittest.TestCase):
         self.addCleanup(self.svc.estado.c.close)
         self.addCleanup(self.svc.quadro.c.close)
 
+    def test_unauthenticated_peer_cannot_make_service_read_a_large_body(self):
+        thread = threading.Thread(target=self.svc.run_socket)
+        thread.start()
+        try:
+            self.assertTrue(self.svc.socket_ready.wait(5))
+            endpoint = json.loads(self.cfg.socket_path.read_text(encoding="utf-8"))
+            with socket.create_connection((endpoint["host"], endpoint["port"]), timeout=5) as client:
+                client.settimeout(3)
+                client.sendall(b'{"cmd": "delegar", "x": "' + b"a" * 8192)  # sem token e sem fim de linha
+                result = json.loads(client.recv(4096))
+            self.assertIn("auth", result["erro"])
+            self.assertTrue(cli.chamar(self.cfg, {"cmd": "status"})["ok"])
+        finally:
+            self.svc.parar_ev.set()
+            thread.join(5)
+
     def test_authenticated_cli_hooks_and_rejection(self):
         thread = threading.Thread(target=self.svc.run_socket)
         thread.start()
