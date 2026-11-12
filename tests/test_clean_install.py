@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import tempfile
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -24,6 +25,8 @@ class UnattendedSetup(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), mock.patch("builtins.input", side_effect=AssertionError("prompt")):
             return cli.main(["setup", "--non-interactive", *args])
 
+    @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
+    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_writes_isolated_restricted_config_without_secrets(self):
         self.assertEqual(self.setup_cli("--output-dir", str(self.dest), "--repo-source", str(ROOT)), 0)
         cfg = config.carregar(env={}, arquivo=self.dest / "config.toml")
@@ -69,6 +72,8 @@ class UnattendedSetup(unittest.TestCase):
         self.assertEqual(self.setup_cli("--output-dir", str(link)), 1)
         self.assertEqual(list(self.dest.iterdir()), [marker])
 
+    @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
+    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_refuses_shared_writable_directory(self):
         self.dest.mkdir(mode=0o777)
         self.dest.chmod(0o777)
@@ -139,6 +144,8 @@ class PluginValidation(unittest.TestCase):
 
 
 class CleanEnvironment(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
+    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_drops_credentials_and_config_overrides(self):
         from scripts.clean_install_test import isolated_environment
         with mock.patch.dict(os.environ, {"AAO_CONFIG": "/do-not-read", "OPENAI_API_KEY": "fake-key",
@@ -158,6 +165,8 @@ class CleanEnvironment(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "unexpected doctor result"):
                     check_doctor("aao", Path("/tmp"), {}, configured=False)
 
+    @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
+    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_offline_example_delivers_patch_without_publishing(self):
         from examples.offline_relay import run_demo
         with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
