@@ -11,7 +11,8 @@
 channel = "telegram"           # "telegram" | "whatsapp" (unofficial, see [whatsapp]) | "none" (CLI + Claude Code only)
 user = "aao"                   # unprivileged system user that runs the service and Codex
 timezone = "UTC"               # IANA name; used for display, day counters and the briefing "Updated:" line
-task_timeout = 2400            # seconds per Codex run
+task_timeout = 3600            # seconds per task run; one automatic retry after timeout/restart
+orchestrator = "claude"        # "codex" keeps handoff tasks queued with Codex when Claude returns
 verdict_timeout = 600          # seconds for read-only checks (limit verdict, conversation)
 tasks_per_hour = 6
 handoff_checks_per_day = 6     # cap of real Codex calls caused by Claude's usage-limit hook
@@ -46,6 +47,8 @@ full_access = false
 [claude]
 wakeup_enabled = false   # EXPERIMENTAL: wakes the interactive Claude Code session through its local messaging socket
 session_name = ""        # optional: only wake the session with this name
+dev_fallback = false      # opt-in headless dev on Codex limit; needs service login, at most 50% of task attempts
+probe_minutes = 15        # periodic availability probe when the limit message has no reset time
 
 [telegram]
 chat_id = 0              # YOUR numeric Telegram user id (ask @userinfobot). Only this user, in a private chat, is answered.

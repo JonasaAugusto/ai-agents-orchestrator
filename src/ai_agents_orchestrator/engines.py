@@ -172,7 +172,7 @@ class _Proc:
 
 
 def _rodar(cmd: list[str], stdin: str, cwd: str | None, env: dict, timeout: float, ctl: _Proc,
-           on_line=None) -> tuple[int | None, list[str], str, bool]:
+           on_line=None, *, relogio=time.monotonic, esperar=time.sleep) -> tuple[int | None, list[str], str, bool]:
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, env=env,
                          text=True, start_new_session=True, bufsize=1)
     ctl.p = p
@@ -201,15 +201,15 @@ def _rodar(cmd: list[str], stdin: str, cwd: str | None, env: dict, timeout: floa
         p.stdin.close()  # type: ignore[union-attr]
     except (BrokenPipeError, OSError):
         pass
-    inicio = time.time()
+    inicio = relogio()
     estourou = False
     while p.poll() is None:
         if ctl.cancel.is_set():
             ctl.terminar(grace=5)
-        if time.time() - inicio > timeout and not estourou:
+        if relogio() - inicio > timeout and not estourou:
             estourou = True
             ctl.terminar(grace=10)
-        time.sleep(0.2)
+        esperar(0.2)
     t1.join(5); t2.join(5)
     return p.returncode, linhas, "".join(err), estourou
 
@@ -289,7 +289,7 @@ class CodexRunner:
             cmd += ["--output-schema", schema]
         return cmd + ["-"]
 
-    def executar(self, prompt: str, cwd: Path, sandbox: str = "workspace-write", timeout: float = 2400,
+    def executar(self, prompt: str, cwd: Path, sandbox: str = "workspace-write", timeout: float = 3600,
                  modelo: str | None = None, schema: dict | None = None, resume: str | None = None,
                  add_dirs: tuple = (), on_event=None, esforco: str | None = None) -> Resultado:
         res = Resultado()
@@ -379,14 +379,33 @@ class ClaudeRunner:
         if self.atual:
             self.atual.terminar()
 
-    def executar(self, prompt: str, cwd: Path, timeout: float = 2400, agora: float | None = None) -> Resultado:
+    def executar(self, prompt: str, cwd: Path, timeout: float = 3600, agora: float | None = None,
+                 resume: str | None = None, on_event=None) -> Resultado:
         res = Resultado()
         t0 = time.time()
-        cmd = [self.bin, "-p", "--output-format", "json", "--permission-mode", "acceptEdits"]
+        cmd = [self.bin, "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"]
+        if resume:
+            cmd += ["--resume", resume]
         ctl = _Proc()
         self.atual = ctl
+        resultados = []
+
+        def on_line(linha):
+            try:
+                ev = json.loads(linha)
+            except ValueError:
+                return
+            if not isinstance(ev, dict):
+                return
+            if ev.get("session_id"):
+                res.thread_id = ev["session_id"]
+            if ev.get("type") == "result" or "result" in ev:
+                resultados.append(ev)
+            if on_event:
+                on_event(ev)
+
         try:
-            code, linhas, err, estourou = self._runner(cmd, prompt, str(cwd), env_filhos(self.state_dir), timeout, ctl, None)
+            code, linhas, err, estourou = self._runner(cmd, prompt, str(cwd), env_filhos(self.state_dir), timeout, ctl, on_line)
         except FileNotFoundError:
             res.erro = "claude not found"
             return res
@@ -394,11 +413,14 @@ class ClaudeRunner:
             self.atual = None
         saida = "".join(linhas)
         texto = saida
+        if not resultados:
+            for linha in linhas:
+                on_line(linha)
         try:
-            d = json.loads(saida)
+            d = resultados[-1] if resultados else json.loads(saida)
             texto = str(d.get("result", saida))
             res.erro = texto if d.get("is_error") else ""
-            res.thread_id = d.get("session_id")
+            res.thread_id = d.get("session_id") or res.thread_id
         except ValueError:
             res.erro = err[-500:] if code else ""
         res.exit_code, res.timeout, res.texto = code, estourou, texto

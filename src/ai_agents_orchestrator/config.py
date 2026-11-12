@@ -96,7 +96,7 @@ class Config:
     whatsapp_owner: str = ""  # owner's WhatsApp number, international format digits only (e.g. 15551234567)
     whatsapp_max_per_minute: int = 12  # outgoing rate limit
     timezone: str = "UTC"
-    task_timeout: int = 2400
+    task_timeout: int = 3600
     veredito_timeout: int = 600
     tarefas_por_hora: int = 6
     max_msg_in: int = 3000
@@ -106,6 +106,8 @@ class Config:
     max_codex_simultaneos: int = 1
     claude_sonda_minutos: int = 15
     claude_limite_padrao_min: int = 30
+    claude_dev_fallback: bool = False  # opt-in: headless dev while Codex is limited
+    orchestrator: str = "claude"  # coordinator; independent of the task engine
     botao_expira_seg: int = 600
     lembrete_min: int = 45
     autor_nome: str = "Orchestrator Agent"
@@ -191,6 +193,7 @@ ENV_MAP: dict[str, tuple[str, type]] = {
     "service.max_concurrent_codex": ("max_codex_simultaneos", int), "service.briefing_reminder_min": ("lembrete_min", int),
     "service.commit_author_name": ("autor_nome", str), "service.commit_author_email": ("autor_email", str),
     "service.self_repo": ("self_repo", str),
+    "service.orchestrator": ("orchestrator", str),
     "engines.codex_bin": ("codex_bin", str), "engines.claude_bin": ("claude_bin", str),
     "codex.network_access": ("codex_network", bool), "codex.full_access": ("codex_full_access", bool),
     "service.channel": ("channel", str), "whatsapp.accept_unofficial_risk": ("whatsapp_accept_risk", bool),
@@ -198,13 +201,16 @@ ENV_MAP: dict[str, tuple[str, type]] = {
     "telegram.token": ("token", str), "telegram.chat_id": ("chat_id", int),
     "telegram.max_message_in": ("max_msg_in", int), "telegram.button_ttl": ("botao_expira_seg", int),
     "claude.wakeup_enabled": ("claude_wakeup", bool), "claude.session_name": ("claude_session_name", str),
+    "claude.dev_fallback": ("claude_dev_fallback", bool),
+    "claude.probe_minutes": ("claude_sonda_minutos", int),
     "privacy.mask_dev_secrets": ("mask_dev_secrets", bool), "privacy.allowed_email_domains": ("allowed_email_domains", list),
     "privacy.allowed_emails": ("allowed_emails", list),
     "publish.push_allowlist": ("push_allowlist", list), "publish.manifest": ("publish_manifest", Path),
     "publish.key_file": ("publish_key_file", Path), "publish.push_mode": ("push_modo", str),
 }
 # Short env aliases for the two secrets (what the systemd EnvironmentFile usually holds).
-ALIASES = {"AAO_TELEGRAM_TOKEN": "telegram.token", "AAO_TELEGRAM_CHAT_ID": "telegram.chat_id"}
+ALIASES = {"AAO_TELEGRAM_TOKEN": "telegram.token", "AAO_TELEGRAM_CHAT_ID": "telegram.chat_id",
+           "FALLBACK_TASK_TIMEOUT": "service.task_timeout"}
 
 
 def _conv(valor, tipo):
@@ -274,6 +280,10 @@ def carregar(env: dict[str, str] | None = None, arquivo: Path | None = None) -> 
         except (TypeError, ValueError):
             continue
     c.max_codex_simultaneos = max(1, c.max_codex_simultaneos)
+    c.claude_sonda_minutos = max(1, c.claude_sonda_minutos)
+    c.task_timeout = max(1, c.task_timeout)
+    if c.orchestrator not in ("claude", "codex"):
+        c.orchestrator = "claude"
     if c.push_modo not in ("root", "deploy-key"):
         c.push_modo = "root"
     c.channel = c.channel.strip().lower() if c.channel else "none"

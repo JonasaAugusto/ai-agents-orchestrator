@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Persistent automatic usage-limit resumption, first-reset scheduling when both engines are limited, runtime
+  checkpoints with separate engine sessions, priority queueing and headless Claude development fallback (opt-in,
+  capped at half of persisted task attempts). Codex can keep coordination without an interactive Claude session.
+- `aao status --brief` displays reset times; `aao doctor` checks the persisted schedule. The independent timer and
+  periodic Claude availability probes recover after service/machine restarts, including interrupted context checks.
+
+### Changed
+
+- Queued task timeouts retry once with the saved session and “finish and report”, sharing the existing restart retry
+  budget. Default timeout is 3600 seconds; `FALLBACK_TASK_TIMEOUT` is accepted as a legacy environment alias.
+
+### Documentation
+
+- Quickstart now clones the repository first, so `rules/`, `examples/` and `templates/` exist for the copy steps;
+  installs from the clone (`pip install .`, `pip install '.[whatsapp]'`).
+- The root daemon is documented as required to run tasks (the service refreshes repository mirrors through it and
+  blocks a task when it is unreachable); the FAQ claimed it was optional.
+
 ## [1.0.2] - 2026-11-12
 
 ### Security
@@ -25,14 +45,6 @@ All notable changes to this project are documented here. The format follows
 - Refresh mirrors with the upgraded root daemon before resuming tasks. It creates the protected sibling directories;
   existing shared mirrors are not reused. The parent of `state_dir` must be controlled by root. Review custom path
   references, filesystem permissions and systemd write restrictions before restarting (operator action).
-
-### Documentation
-
-- Quickstart now clones the repository first, so `rules/`, `examples/` and `templates/` exist for the copy steps;
-  installs from the clone (`pip install .`, `pip install '.[whatsapp]'`).
-- The root daemon is documented as required to run tasks (the service refreshes repository mirrors through it and
-  blocks a task when it is unreachable); the FAQ claimed it was optional.
-
 ## [1.0.1] - 2026-11-11
 
 ### Security
