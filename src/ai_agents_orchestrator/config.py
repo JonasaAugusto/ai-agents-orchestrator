@@ -164,6 +164,7 @@ class Config:
     publish_manifest: Path = Path(f"/etc/{NOME}/publish.json")
     publish_key_file: Path = Path(f"/etc/{NOME}/publish.key")
     push_modo: str = "root"  # "root" (root daemon pushes with root's git credential) or "deploy-key" (legacy)
+    push_url_scheme: str = "https"  # lite: "https" or "ssh" (git@github.com:owner/repo.git) for publishing and fetching
     permitir_url_local: bool = False  # tests only: accept github_url (file://, local path) from the repo spec
 
     # --- derived paths
@@ -255,6 +256,7 @@ ENV_MAP: dict[str, tuple[str, type]] = {
     "privacy.allowed_emails": ("allowed_emails", list),
     "publish.push_allowlist": ("push_allowlist", list), "publish.manifest": ("publish_manifest", Path),
     "publish.key_file": ("publish_key_file", Path), "publish.push_mode": ("push_modo", str),
+    "publish.push_url_scheme": ("push_url_scheme", str),
 }
 # Short env aliases for the two secrets (what the systemd EnvironmentFile usually holds).
 ALIASES = {"AAO_TELEGRAM_TOKEN": "telegram.token", "AAO_TELEGRAM_CHAT_ID": "telegram.chat_id",
@@ -351,6 +353,9 @@ def carregar(env: dict[str, str] | None = None, arquivo: Path | None = None) -> 
             c.socket = c.state_dir / "cli.sock"
         # Remote channels and the legacy deploy-key path belong to full mode.
         c.channel, c.push_modo, c.claude_wakeup = "none", "root", False
+        # A sonda `claude -p` usa a conta e a cota do próprio usuário: no modo leve, de hora em hora (salvo escolha).
+        if "AAO_CLAUDE_PROBE_MINUTES" not in e and not (dados.get("claude") or {}).get("probe_minutes"):
+            c.claude_sonda_minutos = 60
         if "AAO_PATHS_CLAUDE_MEMORY" not in e and not (dados.get("paths") or {}).get("claude_memory"):
             c.fonte_memoria = c.fonte_transcripts / "memory"
     c.max_codex_simultaneos = max(1, c.max_codex_simultaneos)
@@ -358,6 +363,8 @@ def carregar(env: dict[str, str] | None = None, arquivo: Path | None = None) -> 
     c.task_timeout = max(1, c.task_timeout)
     if c.orchestrator not in ("claude", "codex"):
         c.orchestrator = "claude"
+    if c.push_url_scheme not in ("https", "ssh"):
+        c.push_url_scheme = "https"
     if c.push_modo not in ("root", "deploy-key"):
         c.push_modo = "root"
     c.channel = c.channel.strip().lower() if c.channel else "none"

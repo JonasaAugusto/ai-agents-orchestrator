@@ -1,6 +1,7 @@
 """Disposable lite installs: no providers, root services or production resources."""
 import io
 import json
+import re
 import os
 import tempfile
 import socket
@@ -63,7 +64,7 @@ class LiteSetup(unittest.TestCase):
             root = Path(tmp)
             selected = root / "selected.toml"
             old = root / "unselected.toml"
-            answers = iter(["lite", str(root / "state"), "UTC", "", "codex", "restricted", ""])
+            answers = iter(["lite", str(root / "state"), "UTC", "", "codex", "restricted", "", "y"])
             with patch.dict(os.environ, {"AAO_CONFIG": str(selected)}), patch.object(config, "CONFIG_FILE", old):
                 wizard = assistente.Assistente(entrada=lambda _: next(answers), saida=lambda _: None,
                                                amb=AmbienteFalso())
@@ -74,7 +75,7 @@ class LiteSetup(unittest.TestCase):
     def test_setup_installs_plugin_checks_login_and_preserves_second_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "config.toml"
-            answers = iter(["lite", str(Path(tmp) / "state"), "UTC", "", "codex", "restricted", ""])
+            answers = iter(["lite", str(Path(tmp) / "state"), "UTC", "", "codex", "restricted", "", "y"])
             amb = AmbienteFalso()
             out = []
             wizard = assistente.Assistente(config_file=p, env_file=Path(tmp) / "env",
@@ -90,6 +91,16 @@ class LiteSetup(unittest.TestCase):
             self.assertEqual(p.read_bytes(), before)
             self.assertFalse((Path(tmp) / "publish.key").exists())
             self.assertTrue(cfg.rules_file.exists())
+
+    def test_setup_does_not_install_plugin_without_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "config.toml"
+            answers = iter(["lite", str(Path(tmp) / "state"), "UTC", "", "codex", "restricted", "", "n"])
+            amb = AmbienteFalso()
+            wizard = assistente.Assistente(config_file=p, env_file=Path(tmp) / "env",
+                entrada=lambda _: next(answers), saida=lambda _: None, amb=amb)
+            self.assertEqual(wizard.executar(), 0)
+            self.assertFalse(any("plugin" in c and "install" in c for c in amb.comandos))
 
     def test_claude_availability_uses_official_status_in_user_environment(self):
         env = {"HOME": "/tmp/fake-user", "PATH": "/tmp/bin:/usr/bin"}
@@ -216,6 +227,84 @@ class LiteWorkflow(Base):
         self.assertNotIn("wrong session", (self.cfg.mirror / "transcript-cauda.jsonl").read_text())
         self.assertEqual(sh("git", "--git-dir", str(self.cfg.repos_dir / "local.git"), "rev-parse", "main").strip(),
                          sh("git", "rev-parse", "HEAD", cwd=source).strip())
+
+    def test_ssh_scheme_is_opt_in_for_github_remotes(self):
+        self.cfg.repos["web-app"] = {"github": "dono/web-app"}
+        self.cfg.push_allowlist = ["dono/web-app"]
+        self.assertEqual(self.backend._url("web-app"), "https://github.com/dono/web-app.git")
+        self.cfg.push_url_scheme = "ssh"
+        self.assertEqual(self.backend._url("web-app"), "git@github.com:dono/web-app.git")
+
+    def test_mirror_fetches_only_recent_workspaces(self):
+        base = self.cfg.workspaces / "web-app"
+        for n in range(1, 31):
+            (base / str(n)).mkdir(parents=True)
+            (base / str(n) / ".git").mkdir()
+            os.utime(base / str(n) / ".git", ns=(n * 10**9, n * 10**9))
+        escolhidos = {p.parent.name for p in self.backend._workspaces_recentes("web-app")}
+        self.assertEqual(len(escolhidos), self.backend.MAX_WORKSPACES_ESPELHADOS)
+        self.assertIn("30", escolhidos)
+        self.assertNotIn("1", escolhidos)
+
+    def test_lite_probe_defaults_to_hourly_unless_chosen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            arq = Path(tmp) / "c.toml"
+            arq.write_text('mode = "lite"\n')
+            self.assertEqual(config.carregar({}, arq).claude_sonda_minutos, 60)
+            arq.write_text('mode = "lite"\n[claude]\nprobe_minutes = 20\n')
+            self.assertEqual(config.carregar({}, arq).claude_sonda_minutos, 20)
+
+    def test_doctor_lite_stopped_service_is_a_warning_not_a_failure(self):
+        cfg = config.Config(mode="lite", state_dir=Path("/nonexistent/state"), local_transport="unix")
+        amb = AmbienteFalso()
+        amb.socket_ativo = lambda _p: False
+        itens = {i.nome: i for i in doctor.checar_runtime(cfg, amb)}
+        self.assertEqual(itens["service socket"].estado, doctor.AVISO)
+        self.assertIn("aao serve", itens["service socket"].detalhe + itens["service socket"].correcao)
+
+    def test_delegate_model_and_effort_apply_to_that_task_only(self):
+        self.criar_repo()
+        self.cfg.repos["web-app"]["fonte"] = str(self.dir / "src")
+        self.assertFalse(self.svc.delegar("web-app", "x", modelo="bad model!")["ok"])
+        self.assertFalse(self.svc.delegar("web-app", "x", esforco="turbo")["ok"])
+        t = self.svc.delegar("web-app", "change", modelo="gpt-6.1-sol", esforco="medium")
+        self.assertTrue(self.svc.ciclo_worker())
+        chamada = self.codex.chamadas[0]
+        self.assertEqual((chamada.get("modelo"), chamada.get("esforco")), ("gpt-6.1-sol", "medium"))
+        self.assertEqual(self.quadro.ver(t["id"])["esforco"], "medium")
+
+    def test_delegate_wait_prints_short_result_and_exit_code(self):
+        respostas = [{"ok": True, "id": 7},
+                     {"ok": True, "tarefa": {"id": 7, "estado": "em_revisao", "branch": "agent/7", "diffstat": "1 file",
+                                             "aviso": None, "erro": None, "resumo": "feito"}}]
+        pedidos = []
+        def falso(_cfg, req, timeout=None):
+            pedidos.append(req)
+            return respostas.pop(0)
+        saida = io.StringIO()
+        with patch.object(cli, "chamar", falso), mock.patch("sys.stdout", saida), mock.patch("sys.stderr", io.StringIO()):
+            code = cli.main(["delegate", "--repo", "web-app", "--title", "t", "--wait", "--effort", "medium"])
+        self.assertEqual(code, 0)
+        self.assertEqual(pedidos[0]["esforco"], "medium")
+        self.assertEqual(pedidos[1]["cmd"], "esperar")
+        self.assertIn("Status: em_revisao", saida.getvalue())
+        self.assertIn("feito", saida.getvalue())
+
+    def test_mirror_without_session_ignores_other_projects(self):
+        root = self.dir / "projects"
+        outro = root / "-outro-projeto"
+        outro.mkdir(parents=True)
+        (outro / "x.jsonl").write_text(json.dumps({"type": "user", "message": {"content": "segredo de outro projeto"}}) + "\n")
+        self.cfg.fonte_transcripts = root
+        r = self.backend._mirror()
+        self.assertFalse(r["ok"] and "segredo" in (self.cfg.mirror / "transcript-cauda.jsonl").read_text())
+        atual = root / re.sub(r"[^A-Za-z0-9]", "-", os.getcwd())
+        atual.mkdir()
+        (atual / "y.jsonl").write_text(json.dumps({"type": "user", "message": {"content": "deste projeto"}}) + "\n")
+        self.backend._mirror()
+        texto = (self.cfg.mirror / "transcript-cauda.jsonl").read_text()
+        self.assertIn("deste projeto", texto)
+        self.assertNotIn("segredo", texto)
 
     def test_delegate_review_briefing_and_hook_with_local_backend(self):
         self.criar_repo()

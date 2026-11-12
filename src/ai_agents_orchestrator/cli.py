@@ -36,7 +36,7 @@ def chamar(cfg, req: dict, timeout: float | None = 30) -> dict:
         connection, token = ipc.connect(cfg, 30 if timeout is None else timeout)
         with connection as c:
             c.settimeout(timeout)
-            c.sendall((json.dumps({**req, "token": token} if token else req) + "\n").encode())
+            c.sendall((json.dumps({"token": token, **req} if token else req) + "\n").encode())
             dados = b""
             while not dados.endswith(b"\n"):
                 p = c.recv(65536)
@@ -398,6 +398,11 @@ def parser() -> argparse.ArgumentParser:
     dl.add_argument("--briefing", help="markdown file with the task briefing")
     dl.add_argument("--briefing-text", "--briefing-texto", dest="briefing_texto")
     dl.add_argument("--priority", dest="prioridade", type=int, default=0, help="higher values run first (default 0)")
+    dl.add_argument("--model", "--modelo", dest="modelo", help="Codex model for this task only (default: the service setting)")
+    dl.add_argument("--effort", "--esforco", dest="esforco", choices=("low", "medium", "high", "xhigh", "max", "ultra"),
+                    help="reasoning effort for this task only")
+    dl.add_argument("--wait", action="store_true", help="wait for the task and print `result --short` (exit 0 = review/completed)")
+    dl.add_argument("--timeout", type=int, default=0, help="with --wait: seconds to wait (default: until it finishes)")
     dl.add_argument("--motor", default="codex", help=argparse.SUPPRESS)
     ls = _sub(sp, "list", "listar", help="list board tasks")
     ls.add_argument("--state", "--estado", dest="estado")
@@ -571,7 +576,8 @@ def main(argv=None) -> int:
         if a.briefing:
             briefing = Path(a.briefing).read_text(encoding="utf-8")
         req.update(repo=a.repo, titulo=a.titulo, descricao=a.descricao, briefing=briefing,
-                   arquivos=[x for x in a.arquivos.split(",") if x], prioridade=a.prioridade)
+                   arquivos=[x for x in a.arquivos.split(",") if x], prioridade=a.prioridade,
+                   modelo=a.modelo, esforco=a.esforco)
     elif cmd == "list":
         estado = FILTROS_ESTADO.get(a.estado, a.estado)
         req.update(estados=[estado] if estado else None, dono=a.dono)
@@ -584,6 +590,18 @@ def main(argv=None) -> int:
     elif cmd == "claim":
         req.update(id=a.id, dono=a.dono, arquivos=[x for x in a.arquivos.split(",") if x])
     r = chamar(cfg, req)
+    if cmd == "delegate" and a.wait and r.get("ok"):
+        print(f"queued task #{r['id']}; waiting...", file=sys.stderr)
+        w = chamar(cfg, {"cmd": "esperar", "id": r["id"], "timeout": max(0, a.timeout)},
+                   timeout=a.timeout + 5 if a.timeout > 0 else None)
+        if not w.get("ok"):
+            print(w.get("erro")); return 2
+        t = w["tarefa"]
+        print(f"Status: {t['estado']}\nBranch: {t.get('branch') or '-'}")
+        print(f"Diffstat: {t.get('diffstat') or '-'}")
+        print(f"Warnings: {t.get('aviso') or '-'}; error: {t.get('erro') or '-'}")
+        print("\n".join((t.get("resumo") or "(no report)").splitlines()[:10]))
+        return 0 if t["estado"] in ("em_revisao", "concluida") else 1
     if cmd == "list" and r.get("ok"):
         r = {**r, "tarefas": [{**t, "estado": ESTADOS_CLI.get(t["estado"], t["estado"])}
                               for t in r.get("tarefas", [])]}
