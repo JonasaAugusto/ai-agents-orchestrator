@@ -7,9 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - `aao mcp`: minimal MCP server on stdio (standard library only) with `delegate` (including `model`/`effort`), `status`, `result` and `review`. It never publishes; publishing stays a human approval in the CLI. Registration: `claude mcp add aao -- aao mcp`.
+- `lite.transcripts_project` (or `AAO_LITE_TRANSCRIPTS_PROJECT`): names the project whose Claude Code transcripts the lite mirror reads, instead of relying on the directory where `aao serve` runs. Accepts a project path or the encoded folder name. `aao setup` asks for it and `aao doctor` reports a `transcripts project` check with the exact fix.
+
+### Fixed
+- `examples/offline_relay.py` builds its disposable source repository with `git add`/`git commit` instead of `git fast-import`, inherits `PATH` (the old minimal `PATH` hid git on Windows) and writes bytes as-is; the test now runs on Windows too.
+- Typing: `file_lock`, `ProcessJob`, `which`, the IPC client, the usage window and the mirror export now type-check without `# type: ignore`.
 
 ### Changed
 - WhatsApp is now clearly an optional, unofficial extra with ban risk: out of the first screen of both READMEs, `pip install '...[whatsapp]'`, the library is imported lazily, the wizard says it is an unofficial extra and checks the library, and `aao doctor` warns when the library is installed but unused. Existing WhatsApp setups keep working.
+- mypy now runs with `check_untyped_defs` over the lite runtime, IPC, compat, usage measurement, config, mirror and doctor, plus a `--platform win32` pass over the portable modules in CI.
 
 ## [1.3.0] - 2026-11-12
 

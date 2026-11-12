@@ -708,6 +708,10 @@ overridden by `AAO_<SECTION>_<KEY>` (e.g. `AAO_SERVICE_TASKS_PER_HOUR=3`); secre
 and `local = true` for repositories without a remote. Deploy commands live in a root-only allowlist,
 [`examples/publish.example.json`](examples/publish.example.json).
 
+Lite mode: `[lite] transcripts_project` (or `AAO_LITE_TRANSCRIPTS_PROJECT`) names the project folder whose Claude Code
+transcripts the mirror reads (a project path, or the encoded folder name under `paths.claude_transcripts`). Without it,
+the folder where `aao serve` runs is used. `aao setup` asks for it and `aao doctor` checks it.
+
 ## FAQ
 
 **Does it need API keys?** No. It runs the `codex` and `claude` CLIs with the logins you already have; usage counts
