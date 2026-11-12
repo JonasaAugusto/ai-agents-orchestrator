@@ -218,10 +218,12 @@ def _rodar(cmd: list[str], stdin: str, cwd: str | None, env: dict, timeout: floa
     return p.returncode, linhas, "".join(err), estourou
 
 
-def sandbox_efetivo(sandbox: str, acesso_total: bool = False) -> str:
+def sandbox_efetivo(sandbox: str, acesso_total: bool = False, incluir_somente_leitura: bool = False) -> str:
     """Sandbox Codex really gets. Only with the explicit opt-in `codex.full_access = true` does every mode other
-    than read-only become danger-full-access (no sandbox, network, service uid). Default: unchanged."""
-    if acesso_total and sandbox != "read-only":
+    than read-only become danger-full-access (no sandbox, network, service uid). With the additional opt-in
+    `codex.full_access_read_only = true`, read-only phases (reviews, research) get the same access, so Codex has
+    exactly Claude's permissions in every phase. Default: unchanged."""
+    if acesso_total and (sandbox != "read-only" or incluir_somente_leitura):
         return "danger-full-access"
     return sandbox
 
@@ -244,13 +246,14 @@ def status_login_codex(state_dir: Path, binario: str = "codex", runner=None) -> 
 
 class CodexRunner:
     def __init__(self, state_dir: Path, binario: str = "codex", runner=None, rede: bool = False,
-                 acesso_total: bool = False):
+                 acesso_total: bool = False, acesso_total_leitura: bool = False):
         self.state_dir = Path(state_dir)
         self.bin = binario
         self.atual: _Proc | None = None
         self._runner = runner or _rodar  # injectable in tests
         self.rede = rede  # codex.network_access
         self.acesso_total = acesso_total  # codex.full_access (DANGER, explicit opt-in)
+        self.acesso_total_leitura = acesso_total_leitura  # codex.full_access_read_only (also read-only phases)
 
     def logado(self) -> bool:
         """Login status via the OFFICIAL command (`codex login status`), cached for 60 s. Credential files are never
@@ -272,7 +275,7 @@ class CodexRunner:
 
     def comando(self, cwd: str, sandbox: str, saida: str, modelo: str | None = None, schema: str | None = None,
                 resume: str | None = None, add_dirs: tuple = (), esforco: str | None = None) -> list[str]:
-        sandbox = sandbox_efetivo(sandbox, self.acesso_total)
+        sandbox = sandbox_efetivo(sandbox, self.acesso_total, self.acesso_total_leitura)
         base = [self.bin, "-a", "never", "exec"]
         if resume:
             base += ["resume", resume]

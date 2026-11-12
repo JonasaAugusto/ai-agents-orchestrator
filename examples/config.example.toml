@@ -43,6 +43,7 @@ network_access = false   # outbound network inside the workspace-write sandbox (
 # DANGER: full_access = true runs Codex with --sandbox danger-full-access (NO sandbox, full network, whatever the
 # service user can touch). Only enable it on a machine you are ready to lose, and never with the service as root.
 full_access = false
+full_access_read_only = false  # with full_access = true: also read-only phases (reviews, research)
 
 [claude]
 wakeup_enabled = false   # EXPERIMENTAL: wakes the interactive Claude Code session through its local messaging socket

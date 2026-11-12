@@ -107,9 +107,9 @@ def checar_status_espelho(repo: str, r: dict, sha_local: str | None) -> str | No
 
 # ------------------------------------------------------------------ capabilities and snapshot
 def capacidades(sandbox: str, modelo: str | None, esforco: str | None, motor: str = "codex", *,
-                rede_config: bool = False, acesso_total: bool = False) -> dict:
+                rede_config: bool = False, acesso_total: bool = False, acesso_total_leitura: bool = False) -> dict:
     """What the run REALLY has (same logic as CodexRunner.comando), not what some rule text says."""
-    efetivo = engines.sandbox_efetivo(sandbox, acesso_total) if motor == "codex" else "acceptEdits (claude -p)"
+    efetivo = engines.sandbox_efetivo(sandbox, acesso_total, acesso_total_leitura) if motor == "codex" else "acceptEdits (claude -p)"
     if efetivo == "read-only":
         rede = "no"
     elif efetivo == "workspace-write":
@@ -133,7 +133,8 @@ def montar_snapshot(cfg: Config, agora: float, *, sandbox: str, modelo: str | No
                     envolvidos: list[str] | None = None) -> dict:
     """{"texto", "avisos", "shas", "capacidades", "briefing"}. `sincronizados`: repos whose mirror was refreshed and checked
     against GitHub just now (SHA recorded); the others show the mirror's SHA without that guarantee."""
-    cap = capacidades(sandbox, modelo, esforco, motor, rede_config=cfg.codex_network, acesso_total=cfg.codex_full_access)
+    cap = capacidades(sandbox, modelo, esforco, motor, rede_config=cfg.codex_network, acesso_total=cfg.codex_full_access,
+                      acesso_total_leitura=cfg.codex_full_access_read_only)
     shas = {r: sha_base(cfg, r) or "" for r in cfg.repos}
     sincronizados = sincronizados or {}
     shas.update({r: s for r, s in sincronizados.items() if s})

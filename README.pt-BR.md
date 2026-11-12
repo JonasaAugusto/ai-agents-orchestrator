@@ -13,7 +13,7 @@ assume o bastão e continua até o Claude voltar. Você comanda pelo terminal ou
 publicado sem a sua aprovação explícita.
 
 - **Sem chaves de API.** Usa os CLIs oficiais `codex` e `claude` com os seus logins.
-- **Seguro por padrão.** O Codex roda sem privilégios, no sandbox dele, sem rede, em clones descartáveis; publicar exige um humano.
+- **Você escolhe as permissões.** O Codex começa restrito (sandbox próprio, sem rede, clones descartáveis). Na sua própria máquina, pode receber as mesmas permissões do Claude ([Modos de permissão](#modos-de-permissão)). Nos dois casos, publicar exige um humano.
 - **Resultado honesto.** Tarefa cujo relatório diz `partial` ou `blocked` nunca aparece como concluída.
 - **Só a biblioteca padrão do Python.** Um extra opcional (WhatsApp). Testado em Python 3.11 e 3.12.
 
@@ -127,13 +127,48 @@ execuções observadas e sessões espelhadas; só importa registros presentes na
 separados de subagentes, sessões perdidas e histórico antigo não são reconstruídos. Atualize o plugin ou mescle
 [claude-hooks.json](examples/claude-hooks.json) e calibre as cotas antes de usar a razão para decisões.
 
+## Modos de permissão
+
+O Codex não precisa ficar em sandbox: você escolhe um de dois modos. O assistente (`aao setup`) pergunta, ou ajuste as
+chaves no `config.toml`; o `aao doctor` mostra sempre o modo em vigor.
+
+| | Restrito (padrão) | Acesso total (mesmas permissões do Claude) |
+| --- | --- | --- |
+| Chaves | `codex.full_access = false` | `codex.full_access = true`, e `codex.full_access_read_only = true` para incluir as fases só de leitura (revisões, pesquisas) |
+| Sandbox | `workspace-write`, num clone descartável | `danger-full-access`: sem sandbox, com o uid do serviço |
+| Rede | desligada (`codex.network_access = true` libera só a saída) | ligada |
+| Serve para | máquinas compartilhadas ou não confiáveis, repositórios desconhecidos | a sua máquina e repositórios em que você confia, onde o Codex precisa instalar dependências, rodar suítes com banco, acessar GitHub e repositórios de pacotes, como o Claude Code faz por você |
+| Vale nos dois | publicar exige um humano; segredos ficam num arquivo só do root, fora do ambiente dos motores; um único dono no chat | igual |
+
+O autor usa o acesso total em todas as fases (inclusive nas revisões só de leitura), então o Codex tem as mesmas
+permissões do Claude. O preço é que tudo o que o Codex lê (um arquivo malicioso num repositório, um comando injetado
+por uma página da web) roda com essas permissões: escolha acesso total só onde você também deixaria o Claude Code rodar
+sem supervisão, mantenha os segredos fora do alcance e a lista de publicação curta.
+
 ## Modelo de segurança (padrões)
+
+Estes são os padrões do modo restrito; os [Modos de permissão](#modos-de-permissão) explicam como relaxá-los.
 
 Codex como usuário sem privilégio (`aao`), `workspace-write` **sem rede**; `danger-full-access` só com
 `codex.full_access = true` (opt-in explícito, com aviso); publicar sempre exige humano; nada vai ao GitHub fora de
 `publish.push_allowlist` (vazio por padrão); token e chave HMAC num arquivo 0600 do root; um único dono no chat;
 daemon root restrito (obrigatório para rodar tarefas: ele atualiza os espelhos dos repositórios); acordar a sessão do Claude desligado (experimental); segredos de desenvolvimento
 mascarados por padrão. Veja [SECURITY.md](SECURITY.md).
+
+## Quem orquestra
+
+`service.orchestrator` (perguntado no `aao setup`) define quem coordena o trabalho: `claude` (padrão) ou `codex`. O outro
+motor executa e revisa. Um humano aprova toda publicação nos dois casos.
+
+| | `orchestrator = "claude"` | `orchestrator = "codex"` |
+| --- | --- | --- |
+| Coordenação | o Claude planeja, conversa com você e delega; o Codex implementa e faz revisão cruzada | o Codex segue coordenando; o Claude é chamado para o que precisa das habilidades dele (design e interface, revisão de risco) |
+| Quando o Claude volta do limite | o Claude retoma o bastão e lê o relatório de passagem | as tarefas de passagem ficam na fila com o Codex |
+| Política de equilíbrio, avisos, aprovação humana | igual | igual |
+
+O que existe hoje: o comportamento de passagem acima, a escolha no `aao setup` e a linha no `aao doctor`. A skill do
+Claude Code que acompanha o projeto foi escrita para o Claude como coordenador; com `codex`, você conduz o trabalho
+pelo canal de chat (Telegram ou WhatsApp) e usa o Claude Code para as tarefas que enviar a ele.
 
 ## Início rápido
 
@@ -179,6 +214,22 @@ credenciais nem inicia/reinicia serviços. Serviços parados continuam como falh
 Copie e adapte `rules/BASE_RULES.example.md`, `rules/DIVISION.example.md` e `templates/AGENTS.example.md` para os
 caminhos da configuração ([`examples/config.example.toml`](examples/config.example.toml)). Para testar sem conta
 nenhuma: `aao serve --dry-run`.
+
+## Tutorial: a primeira tarefa
+
+1. **Instale e configure** pelo [Início rápido](#início-rápido). No `aao setup` escolha o orquestrador, as permissões do
+   Codex ([modos](#modos-de-permissão)), o canal de chat e os repositórios.
+2. **Faça o login do Codex** como o usuário do serviço e instale o plugin do Claude Code (passos do Início rápido).
+3. **Confira** com `aao doctor` e corrija o que ele apontar; `aao status --brief` mostra o resumo de cinco linhas.
+4. **Delegue** pelo Claude Code com `/delegate` (arquivo de briefing de no máximo 15 linhas: objetivo, arquivos, comando
+   de teste, critério de pronto) ou pelo shell com `aao delegate --repo R --title T --briefing ARQUIVO`.
+5. **Espere o aviso**: o hook entrega uma mensagem curta quando o Codex termina. Não faça polling.
+6. **Revise em camadas** com `/review-task <id>`: o Codex faz a revisão cruzada e prova os testes; você lê
+   `aao result <id> --short` e abre só os arquivos de risco (remoções, autenticação, migrações, dinheiro, segurança).
+7. **Publique** só depois da sua aprovação: o botão no chat, ou o CLI do root, onde você digita o id da tarefa. A
+   aprovação fica presa ao commit revisado; um branch alterado exige nova aprovação.
+
+Um passo a passo completo, comando por comando, está no [exemplo ponta a ponta](#exemplo-ponta-a-ponta).
 
 ## Plugin do Claude Code
 
@@ -303,6 +354,30 @@ por root. Na atualização, o operador reinicia os dois componentes na mesma ver
 botões de aprovação. Referências a caminhos e permissões personalizadas precisam acompanhar a mudança antes do
 reinício. Aprovações fixam SHA, repositório e destino; Git de entrega usa configuração privada. Hooks levam somente
 ids e estados; relatórios consultados são dados não confiáveis. Detalhes em [SECURITY.md](SECURITY.md).
+
+## Decisões de projeto
+
+- **Dois motores, um time.** O Claude planeja, conversa e revisa; o Codex implementa e faz revisão cruzada. Dividir o
+  trabalho mantém as duas assinaturas úteis e a revisão independente de quem escreveu.
+- **Briefing vivo (até 40 linhas) mais um snapshot de execução.** O Codex começa cada rodada sabendo as regras, o estado
+  e o que de fato vale (sandbox, rede, modelo, repositórios). O snapshot evita afirmar capacidades que não existem
+  naquela rodada.
+- **O espelho do GitHub é a base.** O Codex enxerga só o que está publicado; um branch que existe só na sua máquina
+  bloqueia a tarefa até você subi-lo. Isso evita trabalhar sobre estado velho ou privado.
+- **Publicar exige um humano.** A aprovação fica presa ao SHA do commit, ao repositório, ao branch e ao destino, com
+  assinatura que expira e vale uma vez. Um agente prepara a integração, nunca a aprova.
+- **Restrito por padrão, acesso total por escolha.** A segurança é o padrão; o acesso total existe porque o trabalho real
+  precisa de dependências, banco e rede, e vem documentado com o risco.
+- **Equilíbrio, não só reserva.** O uso dos dois motores é medido só com contadores (nunca texto de conversa) e uma razão
+  alvo decide quem revisa. Quando um lado bate o limite, o outro continua e o trabalho retoma no primeiro reset; com os
+  dois no limite, a fila espera.
+- **Estados honestos.** Relatório `partial` ou `blocked` é trabalho inacabado, qualquer que seja o código de saída; o
+  resultado curto é o padrão para que ler custe pouco.
+- **Um daemon root estreito.** Só operações fixas rodam como root (espelhos, publicação, avisos); ele se recusa a iniciar
+  se o código dele for gravável por não-root e nunca confia em configuração de repositório que não é dele.
+- **Commits sem co-autor nem atribuição de ferramenta**, a menos que você configure: o autor é você.
+- **WhatsApp é opcional e não oficial.** Existe como substituto completo do Telegram, por conta e risco do usuário, depois
+  de digitar uma aceitação explícita no assistente.
 
 ## Limitações e roteiro
 

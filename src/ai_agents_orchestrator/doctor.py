@@ -288,10 +288,14 @@ def checar_base(cfg: Config, amb: Ambiente) -> list[Item]:
         itens.append(Item("service user", FALHA, f"user '{cfg.service_user}' does not exist",
                           f"useradd --system --home-dir {cfg.state_dir} --shell /usr/sbin/nologin {cfg.service_user}"))
     if cfg.codex_full_access:
-        itens.append(Item("codex sandbox", AVISO, "codex.full_access = true: Codex runs with NO sandbox",
-                          "Set codex.full_access = false unless you really accept that risk."))
+        alcance = "every phase, including read-only reviews" if cfg.codex_full_access_read_only else "every phase except read-only reviews"
+        itens.append(Item("codex sandbox", AVISO, f"codex.full_access = true: Codex runs with NO sandbox, network and the service uid in {alcance}",
+                          "Fine on your own machine with trusted repos (it is what gives Codex Claude's permissions). "
+                          "Set codex.full_access = false for the restricted mode."))
     else:
         itens.append(Item("codex sandbox", OK, "workspace-write sandbox" + (" with network" if cfg.codex_network else ", no network")))
+    itens.append(Item("orchestrator", OK, f"{cfg.orchestrator} coordinates"
+                      + ("; Claude executes and reviews risk" if cfg.orchestrator == "codex" else "; Codex implements and cross-reviews")))
     if cfg.claude_wakeup:
         itens.append(Item("claude wake-up", AVISO, "EXPERIMENTAL: uses an undocumented local socket format"))
     if amb.stat(cfg.rules_file) is None:

@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Codex permission modes documented and configurable: `restricted` (default) or full access, the same permissions as
+  Claude. New key `codex.full_access_read_only` extends `codex.full_access` to read-only phases (reviews, research),
+  and `aao setup` asks which mode to use and who orchestrates (`claude` or `codex`). `aao doctor` shows both.
+- README (English and Portuguese): permission modes, who orchestrates, a first-task tutorial and the design decisions
+  with their reasons. The "Codex has no network" premise is replaced by the two modes and their risks.
+
 ### Reliability and context economy
 
 - Wait for task completion on a single socket request; notify waiters on state changes and service shutdown.

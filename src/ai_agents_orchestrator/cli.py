@@ -90,7 +90,8 @@ def montar_servico(cfg, dry_run: bool, sem_telegram: bool, chave: str | None = N
         codex, claude, root = CodexFalso(cfg.state_dir), None, RootFalso()
         sem_telegram = True
     else:
-        codex = engines.CodexRunner(cfg.state_dir, cfg.codex_bin, rede=cfg.codex_network, acesso_total=cfg.codex_full_access)
+        codex = engines.CodexRunner(cfg.state_dir, cfg.codex_bin, rede=cfg.codex_network, acesso_total=cfg.codex_full_access,
+                                    acesso_total_leitura=cfg.codex_full_access_read_only)
         claude = engines.ClaudeRunner(cfg.state_dir, cfg.claude_bin)
         root = root_daemon.RootClient(str(cfg.root_socket), chave_hex=chave)
         if cfg.codex_full_access:

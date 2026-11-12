@@ -128,6 +128,7 @@ class Config:
     # --- safety switches (safe defaults)
     codex_network: bool = False  # outbound network inside Codex's workspace-write sandbox
     codex_full_access: bool = False  # DANGER: danger-full-access (no sandbox). Explicit opt-in only.
+    codex_full_access_read_only: bool = False  # with full_access: read-only phases (reviews) get full access too
     claude_wakeup: bool = False  # EXPERIMENTAL: post into the interactive Claude Code session socket
     claude_sessions_dir: Path = Path("/root/.claude/sessions")
     claude_session_name: str = ""
@@ -216,6 +217,7 @@ ENV_MAP: dict[str, tuple[str, type]] = {
     "service.orchestrator": ("orchestrator", str),
     "engines.codex_bin": ("codex_bin", str), "engines.claude_bin": ("claude_bin", str),
     "codex.network_access": ("codex_network", bool), "codex.full_access": ("codex_full_access", bool),
+    "codex.full_access_read_only": ("codex_full_access_read_only", bool),
     "service.channel": ("channel", str), "whatsapp.accept_unofficial_risk": ("whatsapp_accept_risk", bool),
     "whatsapp.owner_number": ("whatsapp_owner", str), "whatsapp.max_messages_per_minute": ("whatsapp_max_per_minute", int),
     "telegram.token": ("token", str), "telegram.chat_id": ("chat_id", int),

@@ -176,7 +176,7 @@ class Setup(unittest.TestCase):
 
     def test_telegram_grava_config_e_segredos_0600(self):
         token = "123456:" + "A" * 30
-        out = self.rodar(["aao", str(self.d / "st"), "UTC", "", "telegram", token, "777",
+        out = self.rodar(["aao", str(self.d / "st"), "UTC", "", "claude", "restricted", "telegram", token, "777",
                           "app", "o/app", "main", "y", ""])
         cfg = tomllib.loads((self.d / "config.toml").read_text())
         self.assertEqual(cfg["service"]["channel"], "telegram")
@@ -195,17 +195,40 @@ class Setup(unittest.TestCase):
         self.assertEqual(c.repos["app"]["branch_base"], "main")
         config.definir_fuso("America/Montevideo")
 
+    def test_escolhe_orquestrador_e_permissoes_do_codex(self):
+        self.rodar(["aao", str(self.d / "st"), "UTC", "", "codex", "full", "none", ""])
+        cfg = tomllib.loads((self.d / "config.toml").read_text())
+        self.assertEqual(cfg["service"]["orchestrator"], "codex")
+        self.assertTrue(cfg["codex"]["full_access"] and cfg["codex"]["full_access_read_only"] and cfg["codex"]["network_access"])
+        c = config.carregar({"AAO_CONFIG": str(self.d / "config.toml")})
+        self.assertEqual(c.orchestrator, "codex")
+        self.assertTrue(c.codex_full_access and c.codex_full_access_read_only)
+
+    def test_padrao_e_restrito_com_claude_orquestrando(self):
+        self.rodar(["aao", str(self.d / "st"), "UTC", "", "", "", "none", ""])
+        cfg = tomllib.loads((self.d / "config.toml").read_text())
+        self.assertEqual(cfg["service"]["orchestrator"], "claude")
+        self.assertFalse(cfg["codex"]["full_access"] or cfg["codex"]["full_access_read_only"] or cfg["codex"]["network_access"])
+
+    def test_sandbox_efetivo_com_acesso_total_em_todas_as_fases(self):
+        from ai_agents_orchestrator import engines
+        self.assertEqual(engines.sandbox_efetivo("workspace-write", True), "danger-full-access")
+        self.assertEqual(engines.sandbox_efetivo("read-only", True), "read-only")
+        self.assertEqual(engines.sandbox_efetivo("read-only", True, True), "danger-full-access")
+        self.assertEqual(engines.sandbox_efetivo("read-only", False, True), "read-only")
+        self.assertEqual(engines.sandbox_efetivo("workspace-write", False, True), "workspace-write")
+
     def test_sem_canal_mostra_o_aviso(self):
-        out = self.rodar(["aao", str(self.d / "st"), "UTC", "", "none", ""])
+        out = self.rodar(["aao", str(self.d / "st"), "UTC", "", "claude", "restricted", "none", ""])
         self.assertIn("Without a chat channel you cannot send prompts to Codex from your phone", out)
         self.assertEqual(tomllib.loads((self.d / "config.toml").read_text())["service"]["channel"], "none")
 
     def test_whatsapp_exige_aceite_explicito(self):
-        out = self.rodar(["aao", str(self.d / "st"), "UTC", "", "whatsapp", "yes", ""])
+        out = self.rodar(["aao", str(self.d / "st"), "UTC", "", "claude", "restricted", "whatsapp", "yes", ""])
         self.assertIn("not affiliated with WhatsApp or Meta", out)
         self.assertEqual(tomllib.loads((self.d / "config.toml").read_text())["service"]["channel"], "none")
         pareados = []
-        self.rodar(["aao", str(self.d / "st"), "UTC", "", "whatsapp", "I ACCEPT THE RISK", "15550100000", ""],
+        self.rodar(["aao", str(self.d / "st"), "UTC", "", "claude", "restricted", "whatsapp", "I ACCEPT THE RISK", "15550100000", ""],
                    parear=pareados.append)
         cfg = tomllib.loads((self.d / "config.toml").read_text())
         self.assertTrue(cfg["whatsapp"]["accept_unofficial_risk"])

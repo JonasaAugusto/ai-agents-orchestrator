@@ -270,7 +270,7 @@ class ConfigNaoLegivelPorTodos(unittest.TestCase):
     def test_setup_grava_config_sem_leitura_para_outros(self):
         with tempfile.TemporaryDirectory() as t:
             d = Path(t)
-            it = iter(["aao", str(d / "st"), "UTC", "", "telegram", "123456:" + "A" * 30, "777", ""])
+            it = iter(["aao", str(d / "st"), "UTC", "", "claude", "restricted", "telegram", "123456:" + "A" * 30, "777", ""])
             a = assistente.Assistente(entrada=lambda _p: next(it), saida=lambda *_: None, config_file=d / "config.toml",
                                       env_file=d / "env")
             self.assertEqual(a.executar(), 0)

@@ -14,13 +14,14 @@ and keeps going until Claude is back. You stay in charge from the terminal or yo
 deployed without your explicit approval.
 
 - **No API keys.** It drives the official `codex` and `claude` CLIs with your own logins.
-- **Safe by default.** Codex runs unprivileged, in its sandbox, without network, in throwaway clones; publishing needs a human.
+- **You choose the permissions.** Codex starts restricted (own sandbox, no network, throwaway clones). On your own machine you can give it the same permissions as Claude ([Permission modes](#permission-modes)). Either way, publishing needs a human.
 - **Honest results.** A task whose report says `partial` or `blocked` is never shown as done, whatever the exit code.
 - **Python standard library only.** One optional extra (WhatsApp). Tested on Python 3.11 and 3.12.
 
 ## Contents
 
-[How it works](#how-it-works) · [Features](#features) · [Security model](#security-model) · [Quickstart](#quickstart) ·
+[How it works](#how-it-works) · [Features](#features) · [Permission modes](#permission-modes) · [Security model](#security-model) · [Who orchestrates](#who-orchestrates) ·
+[Quickstart](#quickstart) · [Tutorial](#tutorial-your-first-task) · [Design decisions](#design-decisions) ·
 [Claude Code plugin](#claude-code-plugin) · [Cost and balancing](#cost-and-balancing) · [Watching Codex live](#watching-codex-live) · [Chat channels](#chat-channels) ·
 [Telegram commands](#telegram-commands) · [CLI reference](#cli-reference) · [Configuration](#configuration) ·
 [FAQ](#faq) · [Limitations](#limitations) · [Roadmap](#roadmap) · [Glossary](#glossary)
@@ -147,7 +148,27 @@ plugin (or merge [claude-hooks.json](examples/claude-hooks.json)) and calibrate 
 | Live view | masked per-task event log, `aao watch`, tmux/terminal opener, experimental Claude Code side pane |
 | Operations | `aao setup`, `aao doctor`, graceful restarts that resume interrupted work once, chat history for Claude |
 
+## Permission modes
+
+Codex does not have to be sandboxed: you pick one of two modes. The wizard asks (`aao setup`), or set the keys in
+`config.toml`; `aao doctor` always shows the mode in force.
+
+| | Restricted (default) | Full access (same permissions as Claude) |
+| --- | --- | --- |
+| Settings | `codex.full_access = false` | `codex.full_access = true`, plus `codex.full_access_read_only = true` to include read-only phases (reviews, research) |
+| Sandbox | `workspace-write`, inside a throwaway clone | `danger-full-access`: no sandbox, the service's uid |
+| Network | off (`codex.network_access = true` opens outbound only) | on |
+| Good for | shared or untrusted machines, unknown repositories | your own machine and repositories you trust, where Codex has to install dependencies, run test suites with databases, reach GitHub or package registries, exactly like Claude Code does for you |
+| Still true in both | publishing needs a human; secrets stay in a root-only file out of the engines' environment; one chat owner | same |
+
+The author runs the full-access mode in every phase (including read-only reviews), so Codex has the same permissions
+as Claude. The price is that anything Codex reads (a malicious file in a repository, a prompt injected through a web
+page) runs with those permissions: choose full access only where you would also let Claude Code run unattended, keep
+secrets out of reach, and keep the publish allowlist short.
+
 ## Security model
+
+These are the defaults of the restricted mode; [Permission modes](#permission-modes) explains how to relax them.
 
 | Default | Why |
 | --- | --- |
@@ -172,6 +193,21 @@ both components, refreshes mirrors and recreates approval buttons; old approvals
 references and filesystem write restrictions before restarting. See [SECURITY.md](SECURITY.md) for the boundaries.
 Git delivery ignores mutable workspace config; publishing is pinned to the reviewed SHA, repository and destination.
 Hook notices contain ids/states only; consulted reports are untrusted data.
+
+## Who orchestrates
+
+`service.orchestrator` (asked by `aao setup`) says who coordinates the work: `claude` (default) or `codex`. The other
+engine executes and reviews. A human approves every publication in both cases.
+
+| | `orchestrator = "claude"` | `orchestrator = "codex"` |
+| --- | --- | --- |
+| Coordination | Claude plans, talks to you and delegates; Codex implements and cross-reviews | Codex keeps coordinating; Claude is called for what needs its skills (design and interface work, risk review) |
+| When Claude returns from its limit | Claude takes the baton back and reads the handoff | handoff tasks stay queued with Codex |
+| Balance policy, wake-ups, human approval | same | same |
+
+What is implemented today: the handoff behaviour above, the choice in `aao setup`, and the line in `aao doctor`. The
+bundled Claude Code skill is written for Claude as coordinator, so with `codex` you drive the work from the chat
+channel (Telegram or WhatsApp) and use Claude Code for the tasks you send it.
 
 ## Quickstart
 
@@ -259,6 +295,22 @@ aao arm        # aao disarm to turn it off
 ```
 
 Try it without any account: `aao serve --dry-run` uses fake engines and no chat channel.
+
+## Tutorial: your first task
+
+1. **Install and configure** with the [Quickstart](#quickstart). In `aao setup` choose the orchestrator, the Codex
+   permissions ([modes](#permission-modes)), the chat channel and your repositories.
+2. **Log in to Codex** as the service user and install the Claude Code plugin (see the Quickstart steps).
+3. **Check** with `aao doctor` and fix anything it flags; `aao status --brief` shows the five-line summary.
+4. **Delegate** from Claude Code with `/delegate` (a briefing file of at most 15 lines: goal, files, test command,
+   done criterion) or from the shell with `aao delegate --repo R --title T --briefing FILE`.
+5. **Wait for the note**: the hook delivers a short message when Codex finishes. Do not poll.
+6. **Review in layers** with `/review-task <id>`: Codex cross-reviews and proves the tests, you read
+   `aao result <id> --short` and open only risky files (deletions, auth, migrations, money, security).
+7. **Publish** only after your approval: the button in your chat, or the root CLI where you type the task id.
+   The approval is bound to the reviewed commit; a changed branch needs a new approval.
+
+A full command-by-command run is in the [end-to-end example](#end-to-end-example).
 
 ## Claude Code plugin
 
@@ -493,6 +545,30 @@ credentials, so it is the one that pushes and publishes.
 
 **Why are some identifiers in Portuguese?** The project started as an internal tool in Brazil. User-facing text is
 English; see the [glossary](#glossary).
+
+## Design decisions
+
+- **Two engines, one team.** Claude plans, talks and reviews; Codex implements and cross-reviews. Splitting the work
+  keeps both subscriptions useful and the review independent of the author.
+- **A living briefing (at most 40 lines) plus an execution snapshot.** Codex starts every run knowing the rules, the
+  state and what really applies (sandbox, network, model, repositories). The snapshot prevents claims about
+  capabilities that are not true in that run.
+- **The GitHub mirror is the base.** Codex sees only what is published; a branch that exists only on your machine
+  blocks the task until you push it. This avoids working on stale or private state.
+- **Publishing needs a human.** The approval is bound to the commit SHA, repository, branch and destination, with an
+  expiring, single-use signature. An agent can prepare a merge, never approve it.
+- **Restricted by default, full access by choice.** Safety is the default; the full-access mode exists because
+  real work needs dependencies, databases and network, and it is documented with its risk.
+- **Balance, not only fallback.** Usage of both engines is measured with counters only (never conversation text) and a
+  target ratio decides who reviews. When one side hits its limit the other keeps going and the work resumes at the
+  first reset; when both are limited, the queue waits.
+- **Honest states.** `partial` and `blocked` reports are unfinished work whatever the exit code; short results are the
+  default so reading costs little.
+- **A narrow root daemon.** Only fixed operations run as root (mirrors, publishing, wake-ups); it refuses to start if
+  its code is writable by non-root, and it never trusts repository config it does not own.
+- **Commits carry no co-author or tool attribution** unless you configure it: the author is you.
+- **WhatsApp is opt-in and unofficial.** It exists as a full replacement for Telegram, at the user's own risk, after
+  typing an explicit acceptance in the wizard.
 
 ## Limitations
 
