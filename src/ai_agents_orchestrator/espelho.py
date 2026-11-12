@@ -324,7 +324,7 @@ def atualizar_repos(cfg: Config, nomes: list[str] | None = None) -> dict:
             dst = _privado(cfg, nome) if root else cfg.repos_dir / f"{nome}.git"
             try:
                 status[nome] = _atualizar_um(spec, dst)
-                if root and dst.exists():
+                if root and dst.exists() and fd is not None:
                     _exportar(dst, fd, f"{nome}.git", uid, gid)
             except (subprocess.TimeoutExpired, OSError, shutil.Error) as e:
                 status[nome] = {"ok": False, "motivo": type(e).__name__}
@@ -354,10 +354,11 @@ def espelhar(cfg: Config, agora: float | None = None, hook_payload: dict | None 
         if sessao is not None:
             if not isinstance(sessao, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sessao):
                 return {"ok": False, "motivo": "invalid session id"}
-            src = cfg.fonte_transcripts / (sessao + ".jsonl")
+            escolhida = cfg.fonte_transcripts / (sessao + ".jsonl")
             # Never follow a session symlink outside the configured transcript directory.
-            if src.is_symlink() or not src.is_file():
+            if escolhida.is_symlink() or not escolhida.is_file():
                 return {"ok": False, "motivo": "session transcript not found"}
+            src: Path | None = escolhida
         else:
             src = _sessao_atual(cfg)
         n = 0

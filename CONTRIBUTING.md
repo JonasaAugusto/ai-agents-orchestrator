@@ -13,6 +13,7 @@ pip install -e '.[dev]'
 python -m unittest tests.test_clean_install tests.test_doctor_setup tests.test_plugin
 ruff check .
 mypy
+mypy --platform win32 src/ai_agents_orchestrator/{lite,ipc,compat,medicao,config}.py
 sh scripts/clean-install-test.sh --empty
 python -m build
 python -m twine check --strict dist/*
@@ -45,8 +46,11 @@ run the focused adoption tests without elevated privileges; do not grant root on
 make the full suite pass.
 
 Ruff checks `E9`/`F`; existing unused-import exemptions are listed per legacy file in `pyproject.toml`, not applied
-to new files. Mypy checks setup, the installer test and the offline example, following other modules silently;
-it is not a claim that the entire application is typed. Extend the scope as modules are annotated. Developer tool
+to new files. Mypy (with `check_untyped_defs`) checks setup, the lite runtime, IPC, the compatibility layer, usage measurement, config,
+the mirror, doctor, the installer test and the offline example, following other modules silently; CI also checks the
+portable modules with `--platform win32` so the Windows-only branches are typed. Fix types instead of adding
+`# type: ignore` (unused ignores fail the build). It is not a claim that the entire application is typed. Extend the
+scope as modules are annotated. Developer tool
 versions are pinned in the `dev` extra. Runtime installation still has no mandatory dependencies.
 `.gitleaks.toml` inherits the default secret rules and exempts only one exact synthetic masking-test value in its
 specific fixture path (including history). It does not exclude test directories or commits from scanning.

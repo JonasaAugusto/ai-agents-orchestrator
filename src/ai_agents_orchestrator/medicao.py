@@ -122,7 +122,8 @@ def calcular(cfg, estado, agora: float) -> dict:
                     if not isinstance(w, dict) or w.get("duracao_min") != segundos // 60:
                         continue
                     p, reset = w.get("usado_pct"), w.get("reseta_em")
-                    if numero(p) and 0 <= p <= 100 and (reset is None or (numero(reset) and reset > agora)):
+                    if isinstance(p, (int, float)) and numero(p) and 0 <= p <= 100 and (
+                            reset is None or (isinstance(reset, (int, float)) and numero(reset) and reset > agora)):
                         pct, fonte = p, "account/rateLimits/read"
                         break
             motores[motor] = {**tokens, "usado_pct": pct, "fonte": fonte}

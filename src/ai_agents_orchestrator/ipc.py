@@ -17,7 +17,7 @@ def connect(cfg, timeout):
     if cfg.use_tcp:
         d = endpoint(cfg.socket_path)
         return socket.create_connection((d["host"], d["port"]), timeout=timeout), d["token"]
-    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    c = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)  # absent on Windows, which uses TCP above
     try:
         c.settimeout(timeout)
         c.connect(str(cfg.socket_path))

@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+from typing import Any
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -55,9 +56,9 @@ def which(prog: str, env=None) -> str | None:
         if candidate:
             return candidate
     for directory in path.split(os.pathsep):
-        candidate = Path(directory) / (prog if prog.lower().endswith(".ps1") else prog + ".ps1")
-        if candidate.is_file():
-            return str(candidate.resolve())
+        script = Path(directory) / (prog if prog.lower().endswith(".ps1") else prog + ".ps1")
+        if script.is_file():
+            return str(script.resolve())
     return None
 
 
@@ -101,8 +102,9 @@ def kill_tree(pid: int) -> None:
 class ProcessJob:
     """Kill descendants on handle close, including when Windows terminates aao itself."""
     def __init__(self, process):
-        self.handle = None
-        if not WINDOWS:
+        self.handle: Any = None
+        self.kernel: Any = None
+        if sys.platform != "win32":
             return
         import ctypes
         from ctypes import wintypes
@@ -162,7 +164,7 @@ def windows_sid() -> str:
 
 def private(path: Path) -> None:
     """Replace the DACL with current-user-only access; fail closed before writing secrets."""
-    if not WINDOWS:
+    if sys.platform != "win32":
         path.chmod(0o700 if path.is_dir() else 0o600)
         return
     import ctypes
@@ -190,12 +192,13 @@ def private(path: Path) -> None:
 
 @contextmanager
 def file_lock(path: Path, blocking: bool = True):
+    if sys.platform == "win32":
+        import msvcrt
     path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
     locked = False
     try:
-        if WINDOWS:
-            import msvcrt
+        if sys.platform == "win32":
             # The locked byte can extend beyond EOF. Lock release is automatic on close.
             try:
                 msvcrt.locking(fd, msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK, 1)
@@ -209,7 +212,7 @@ def file_lock(path: Path, blocking: bool = True):
         locked = True
         yield
     finally:
-        if WINDOWS and locked:
+        if sys.platform == "win32" and locked:
             os.lseek(fd, 0, os.SEEK_SET)
             msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         os.close(fd)
