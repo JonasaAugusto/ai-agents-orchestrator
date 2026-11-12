@@ -17,80 +17,147 @@ deployed without your explicit approval.
 - **No API keys.** It drives the official `codex` and `claude` CLIs with your own logins.
 - **You choose the permissions.** Codex starts restricted (own sandbox, no network, throwaway clones). On your own machine you can give it the same permissions as Claude ([Permission modes](#permission-modes)). Either way, publishing needs a human.
 - **Honest results.** A task whose report says `partial` or `blocked` is never shown as done, whatever the exit code.
-- **Python with minimal dependencies.** Windows adds `tzdata` for IANA timezones; WhatsApp is an optional extra. CI targets Python 3.11–3.14 on Linux, macOS and Windows; the privileged service requires Linux/systemd.
+- **Python with minimal dependencies.** Windows adds `tzdata` for IANA timezones; WhatsApp is an optional, unofficial extra (Telegram is the recommended channel). CI targets Python 3.11–3.14 on Linux, macOS and Windows; the privileged service requires Linux/systemd.
 
 ## Contents
 
 [How it works](#how-it-works) · [Features](#features) · [Permission modes](#permission-modes) · [Security model](#security-model) · [Who orchestrates](#who-orchestrates) ·
-[Quickstart](#quickstart-lite-mode-121) · [Tutorial](#tutorial-your-first-task) · [Design decisions](#design-decisions) ·
+[Quickstart](#quickstart-lite-mode-121) · [Comparison](docs/comparison.md) · [Support](docs/support-policy.md) · [Tutorial](#tutorial-your-first-task) · [Design decisions](#design-decisions) ·
 [Claude Code plugin](#claude-code-plugin) · [Cost and balancing](#cost-and-balancing) · [Watching Codex live](#watching-codex-live) · [Chat channels](#chat-channels) ·
 [Telegram commands](#telegram-commands) · [CLI reference](#cli-reference) · [Configuration](#configuration) ·
 [FAQ](#faq) · [Limitations](#limitations) · [Roadmap](#roadmap) · [Glossary](#glossary)
 
-Start with [First 10 minutes](docs/first-10-minutes.md), including captured output from a credential-free run.
-See [honest comparison](#honest-comparison--comparação-honesta), [version and support policy](#version-and-support-policy),
+Start with the [Quickstart](#quickstart-lite-mode-121) just below, or [First 10 minutes](docs/first-10-minutes.md), with captured output from a credential-free run.
+See [honest comparison](docs/comparison.md), [version and support policy](docs/support-policy.md),
 [contributing](CONTRIBUTING.md), [conduct](CODE_OF_CONDUCT.md) and [security reports](SECURITY.md).
 
-## Honest comparison / Comparação honesta
+## Quickstart: lite mode (1.2.1)
 
-These are different workflows, not a ranking. Descriptions below were checked against the linked project READMEs
-on **2026-11-12**; alternatives were not installed or benchmarked. "Prefer" is our interpretation of those documented
-workflows. Names are ambiguous: here Hydra means `Geraldlol/hydra`, and codex-router means `gitguffaw/codex-router`.
+On Linux, macOS or Windows, with Python 3.11+, Git 2.38+, Codex CLI and Claude Code installed,
+run this as your normal user:
 
-| Alternative and source | What it does well, according to its docs | When to prefer it |
-| --- | --- | --- |
-| [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc#readme) | Codex reviews, background delegation, rescue and session transfer inside Claude Code. | You want OpenAI's direct Claude Code integration without adopting this project's service/root-daemon model. It already supports handoff; that is not unique to us. |
-| [kingbootoshi/codex-orchestrator](https://github.com/kingbootoshi/codex-orchestrator#readme) | Background Codex agents in tmux, parallel sessions, live attachment, steering and result capture. | Your priority is supervising several terminal workers; Bun and tmux fit your environment. |
-| [jarrodwatts/claude-delegator](https://github.com/jarrodwatts/claude-delegator#readme) | Specialist expert roles and routing via MCP. Its current README says the project is archived and its Codex integration no longer works with current Codex. | Study its specialist prompts or maintain an existing pinned legacy setup. For a new current-Codex install, its author recommends the OpenAI plugin above. |
-| [mustafaakben/agent-codex](https://github.com/mustafaakben/agent-codex#readme) | Delegation/review/research commands, agents, skills and opt-in project/MCP bootstrap templates. | You want a plugin-led workflow with configurable MCP integrations rather than a persistent relay service. |
-| [madd86/codex-bridge](https://github.com/madd86/codex-bridge#readme) | Context-rich prompts, tmux delegation and a supervised review loop. Its documented launch uses `--yolo`. | A small tmux bridge fits a trusted local environment and you accept its documented permission mode. |
-| [LegCLI](https://legcli.com/) | Monitors usage windows and switches models/agents through a configured ladder, carrying context in the same terminal. | Interactive continuity across several CLIs matters most; check its current commercial terms before adopting. |
-| [Hydra](https://github.com/Geraldlol/hydra#readme) | A durable VS Code collaboration room with shared transcripts, planning, build/verification/review phases and multiple agent heads. | You want an editor-centered shared room and its recorded decisions instead of a systemd-backed board. |
-| [codex-router](https://github.com/gitguffaw/codex-router#readme) | Policy-backed Codex delegation/reviews, model/effort controls and persistent jobs from Claude Code or Antigravity. | Routing and host integration are the main need; you do not need our remote control plane. |
-
-This project's focus is the **combination** of reserve execution with return to the coordinator, isolated task branches,
-publishing approval bound to the reviewed SHA and destination, a remote owner channel, and measured usage balancing.
-See [how it works](#how-it-works), [security](SECURITY.md) and [usage measurement](#usage-measurement-and-balance-110)
-for the implementation and limits. Usage balancing uses counters and configured quotas; it is not a dollar-cost
-optimizer and promises no savings. A root agent can bypass application approvals; same-UID isolation is limited.
-The extra service, root daemon and configuration are real adoption costs. For a review inside one editor session,
-start with a smaller integration if that meets your needs.
-
-## Version and support policy
-
-- Releases follow **SemVer**. Within 1.x, documented CLI commands/configuration and the task/report/approval contract
-  are the compatibility surface. Python internals, SQLite tables and local socket payloads are not a public API.
-  Security fixes can reject previously accepted unsafe operations; read the changelog before upgrading.
-- Only the **latest release** receives fixes, including security fixes; there is no LTS branch or response-time SLA.
-  A badge links to published releases; the checkout can include unreleased changes. This policy does not certify an
-  independent audit or production suitability for every environment.
-- Python **3.11–3.14** is the CI target on **Linux and macOS** for the package, tests and offline example.
-  The operational service/root daemon and example units target **Linux with systemd**; a macOS test pass does not
-  certify deployment there. Windows is not tested; WSL is not separately certified. External CLI compatibility also
-  depends on their installed versions; report those versions with bugs.
-- Delegation, review results, restricted defaults and owner-approved publishing are the supported core workflows.
-  `/codex-pane` and interactive Claude wake-up remain **experimental**, off by default, and can change without
-  compatibility guarantees. WhatsApp remains optional/unofficial with its documented risks. Usage balancing requires
-  calibration and treats unknown quotas as unknown.
-
-### Reproduce the installation check
-
-```bash
-sh scripts/clean-install-test.sh --empty
+```text
+pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator
+aao setup
 ```
 
-This creates a temporary venv, runs `pip install .` from a source copy, checks the installed import and `pip check`,
-runs `aao setup --non-interactive --output-dir ... --repo-source ...`, runs `aao doctor`, executes a disposable local
-task with fake Codex, and validates plugin manifests, skill frontmatter and hook CLI arguments. Network is needed
-only to obtain Python build tools. It never starts a real service or logs into an agent.
-Doctor **must fail** when required agents/daemons are absent: the test checks the exact expected failures and exit
-status, and rejects additional failures. Passing this check does not mean a live installation is ready.
-Unattended setup refuses directories owned by another user or writable by group/others and creates configuration
-exclusively, without replacing existing files.
-Plugin validation here is static; actually loading the plugin in an authenticated Claude Code session is a separate
-manual integration check. The plugin is installed from GitHub/the checkout; the Python wheel does not install it.
-CI also builds a wheel/sdist and exercises both with `--distribution`, and runs the source check in empty Python
-slim containers. See [CONTRIBUTING](CONTRIBUTING.md) for the scope of lint/type checks.
+Without cloning, the line above installs the latest `main`. From a clone, use `pipx install .` instead.
+
+Or run `uv tool install git+https://github.com/JonasaAugusto/ai-agents-orchestrator` (or `uv tool install .` from a clone), then `aao setup`. Each installer creates an isolated environment.
+On Linux/macOS you can chain them: `pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator && aao setup`.
+On Windows PowerShell 5.1 or cmd, use the separate commands above (PowerShell 5.1 has no `&&`).
+
+The package is not on PyPI yet (the release workflow is ready and stays off until the PyPI project exists). Ensure pipx's or uv's tool bin directory is on PATH.
+Choose **lite** in the wizard, choose the coordinator (`claude` or `codex`), and register
+the GitHub repositories or local checkouts you want to use. Select the Claude project's
+transcript directory to keep mirrored context scoped to that project. Setup detects both CLIs,
+checks login using `codex login status` and `claude auth status`, and installs the
+Claude Code plugin using Claude's official marketplace commands. It never reads or
+copies credential files. Missing CLIs, logins or plugin installation failures are
+reported with next steps; after fixing them, rerun setup. Existing configuration,
+rules and logins are preserved; edit the config explicitly to change those choices.
+
+```bash
+aao doctor
+aao serve
+# Keep serve running; use another terminal or Claude Code's /delegate command:
+aao delegate --repo myrepo --title "Add a health check" --briefing-text "Add GET /health returning 200 and a test for it."
+aao status --brief
+aao result 1
+aao review --repo myrepo --branch agent/1-my-task
+```
+
+`aao serve` is one user process with worker threads and engine subprocesses. It needs
+neither root nor systemd, refuses to run as root in lite mode, and allows only one
+service per state directory. Delegation, results, cross-review, briefing, usage-limit
+handoff and `hook-prompt` use the same queue as full mode. Both coordinators can use
+the CLI; lite has no remote chat channel. Stop the foreground service with Ctrl+C.
+Nothing runs while it is stopped; persisted work and reset schedules resume at startup.
+
+After reviewing the task, **the human** runs `aao publish <id>` in an interactive
+terminal. The command shows the repository, destination and full branch SHA and
+requires typing `<id> <full-SHA>`. Pipes and `--approved-by-owner` alone are refused.
+Changing the branch or destination invalidates the approval. GitHub publishing merges
+against the current remote base and pushes without force; conflicts or concurrent
+remote updates fail safely. Agent branches remain local until approval; local-only
+repositories are delivered as workspace branches and patches for manual integration.
+This command publishes Git history, not a deployment.
+
+The generated config has top-level `mode = "lite"`. It defaults to
+`~/.config/ai-agents-orchestrator/config.toml` (`XDG_CONFIG_HOME` supported); state
+defaults to `~/.local/state/ai-agents-orchestrator` (`XDG_STATE_HOME` supported).
+`AAO_CONFIG` selects an explicit config; an existing system config remains supported.
+On Windows, config defaults to `%LOCALAPPDATA%\ai-agents-orchestrator\config.toml`
+and state to `%LOCALAPPDATA%\ai-agents-orchestrator\state`.
+Lite uses your normal HOME, PATH and CODEX_HOME, including Homebrew/CLI install paths.
+The local socket lives in the state directory; `paths.socket` can shorten a long path.
+macOS uses peer credentials through `getpeereid`; Linux uses `SO_PEERCRED`. Windows
+uses TCP bound only to `127.0.0.1`, with a new random token per service process in a
+current-user-only ACL endpoint file (never share it). `service.local_transport = "tcp"`
+selects this transport on POSIX too; CLI and hook commands stay the same. Mirrors
+are refreshed on demand; no inotify dependency is needed.
+
+**Lite does not isolate agents from your account, files or Git credentials.** A process
+under your uid can alter state or simulate approval. Interactive confirmation is a
+human workflow safeguard, not a security boundary against malicious same-user code.
+There is no Publish button or deployment runner. Full mode retains the privileged
+daemon, protected state and optional remote approval channel. `aao doctor` explains
+the active mode and these limits. CI tests lite on Linux/macOS and the full suite on
+Windows Python 3.11–3.14, with explicit skips for Linux privilege/Unix socket tests.
+Windows CI additionally exercises ACLs, shims, process trees and a clean pipx install.
+
+### Native Windows or WSL2
+
+For native Windows, install Python 3.11+, Git for Windows 2.38+, pipx or uv, and the
+official Codex CLI and Claude Code for the **same Windows user**. Clone this repository,
+open PowerShell or cmd in that clone, and run the lite installation above. No admin
+session or bash is needed by aao. After `aao doctor`, keep `aao serve` running and use
+`aao watch 1` in a second console. `watch-open` prints the command to run manually.
+
+Detection supports `.exe`, npm `.cmd` shims (launched through their Node script), and
+`.ps1` shims. PowerShell execution policy is respected; if a `.ps1` is blocked, use a
+native executable or an npm installation. Generic batch shims reject shell metacharacters;
+prefer `.exe`/`.ps1` when custom paths or arguments contain them. No sandbox is silently
+weakened to make a CLI run. [Official OpenAI documentation](https://learn.chatgpt.com/docs/windows/windows-sandbox)
+describes the native Codex sandbox. Use [WSL2](https://learn.chatgpt.com/docs/windows/wsl)
+when your Codex version/workflow requires a Linux sandbox or Linux tools. Install Git,
+Python, aao, Codex and Claude **together inside WSL2**, keep repositories in its Linux
+filesystem (for example `~/src`), and run the Linux lite instructions there. Native
+Windows and WSL2 have separate configuration, state, paths and logins; do not mix them.
+
+The Claude plugin uses executable/argument hooks, with `aao.exe` on PATH, so hooks run
+without a shell. On a recent Claude Code, use the PowerShell tool for slash commands;
+if needed enable it with `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. See the official
+[hook exec-form reference](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form)
+and [PowerShell tool reference](https://code.claude.com/docs/en/tools-reference#powershell-tool).
+
+Paths with spaces are passed as arguments; quote paths you type in the console.
+Files and subprocess streams use UTF-8, with CRLF accepted on input. Controlled Git
+operations enable `core.longpaths=true` and use `core.autocrlf=false` in isolated
+workspaces, without editing your Git settings. Python/third-party tools still depend
+on Windows long-path support; prefer a short state directory if a tool hits MAX_PATH.
+`aao doctor` reports that limit. Git storage uses copies on Windows (no Developer Mode
+or symlink privilege), so large repositories require additional disk space and I/O.
+
+For background operation, optionally install a current-user Task Scheduler logon task:
+
+```text
+aao service install --windows
+```
+
+This starts at your **next logon**, with your interactive token and least privilege,
+using the installed Python environment and explicit config path. Keep that environment
+installed. It stores no password, does not elevate, and runs only while logged on.
+To start immediately use `aao serve`; Ctrl+C or `aao stop` drains and then stops workers. Cancellation
+terminates the engine process tree; Windows Job Objects also clean descendants if the
+service exits. Remove automatic startup with `aao service uninstall --windows` (it
+leaves an already running process alone). Managed-device policy may reject registration;
+in that case use a console process. Linux/macOS lite users can keep `aao serve` in a
+terminal or configure their own user process supervisor.
+
+## Comparison and support
+
+How this differs from the alternatives is in the [honest comparison](docs/comparison.md); versions, supported systems and the installation check are in the [support policy](docs/support-policy.md).
 
 ## How it works
 
@@ -288,128 +355,6 @@ bundled Claude Code skill is written for Claude as coordinator, so with `codex` 
 Windows/macOS CI must pass before a release is advertised as validated on those systems.
 The full-mode root daemon, protected privilege boundary and remote Publish button remain Linux-only.
 
-## Quickstart: lite mode (1.2.1)
-
-On Linux, macOS or Windows, with Python 3.11+, Git 2.38+, Codex CLI and Claude Code installed,
-run this **from the cloned repository**, as your normal user:
-
-```text
-pipx install .
-aao setup
-```
-
-Or run `uv tool install .`, then `aao setup`. Each installer creates an isolated environment.
-On Linux/macOS the one-line equivalent is `pipx install . && aao setup`.
-On Windows PowerShell 5.1 or cmd, use the separate commands above (PowerShell 5.1 has no `&&`).
-
-The package is not on PyPI yet. Ensure pipx's or uv's tool bin directory is on PATH.
-Choose **lite** in the wizard, choose the coordinator (`claude` or `codex`), and register
-the GitHub repositories or local checkouts you want to use. Select the Claude project's
-transcript directory to keep mirrored context scoped to that project. Setup detects both CLIs,
-checks login using `codex login status` and `claude auth status`, and installs the
-Claude Code plugin using Claude's official marketplace commands. It never reads or
-copies credential files. Missing CLIs, logins or plugin installation failures are
-reported with next steps; after fixing them, rerun setup. Existing configuration,
-rules and logins are preserved; edit the config explicitly to change those choices.
-
-```bash
-aao doctor
-aao serve
-# Keep serve running; use another terminal or Claude Code's /delegate command:
-aao delegate --help
-aao status --brief
-aao result 1
-aao review --repo myrepo --branch agent/1-my-task
-```
-
-`aao serve` is one user process with worker threads and engine subprocesses. It needs
-neither root nor systemd, refuses to run as root in lite mode, and allows only one
-service per state directory. Delegation, results, cross-review, briefing, usage-limit
-handoff and `hook-prompt` use the same queue as full mode. Both coordinators can use
-the CLI; lite has no remote chat channel. Stop the foreground service with Ctrl+C.
-Nothing runs while it is stopped; persisted work and reset schedules resume at startup.
-
-After reviewing the task, **the human** runs `aao publish <id>` in an interactive
-terminal. The command shows the repository, destination and full branch SHA and
-requires typing `<id> <full-SHA>`. Pipes and `--approved-by-owner` alone are refused.
-Changing the branch or destination invalidates the approval. GitHub publishing merges
-against the current remote base and pushes without force; conflicts or concurrent
-remote updates fail safely. Agent branches remain local until approval; local-only
-repositories are delivered as workspace branches and patches for manual integration.
-This command publishes Git history, not a deployment.
-
-The generated config has top-level `mode = "lite"`. It defaults to
-`~/.config/ai-agents-orchestrator/config.toml` (`XDG_CONFIG_HOME` supported); state
-defaults to `~/.local/state/ai-agents-orchestrator` (`XDG_STATE_HOME` supported).
-`AAO_CONFIG` selects an explicit config; an existing system config remains supported.
-On Windows, config defaults to `%LOCALAPPDATA%\ai-agents-orchestrator\config.toml`
-and state to `%LOCALAPPDATA%\ai-agents-orchestrator\state`.
-Lite uses your normal HOME, PATH and CODEX_HOME, including Homebrew/CLI install paths.
-The local socket lives in the state directory; `paths.socket` can shorten a long path.
-macOS uses peer credentials through `getpeereid`; Linux uses `SO_PEERCRED`. Windows
-uses TCP bound only to `127.0.0.1`, with a new random token per service process in a
-current-user-only ACL endpoint file (never share it). `service.local_transport = "tcp"`
-selects this transport on POSIX too; CLI and hook commands stay the same. Mirrors
-are refreshed on demand; no inotify dependency is needed.
-
-**Lite does not isolate agents from your account, files or Git credentials.** A process
-under your uid can alter state or simulate approval. Interactive confirmation is a
-human workflow safeguard, not a security boundary against malicious same-user code.
-There is no Publish button or deployment runner. Full mode retains the privileged
-daemon, protected state and optional remote approval channel. `aao doctor` explains
-the active mode and these limits. CI tests lite on Linux/macOS and the full suite on
-Windows Python 3.11–3.14, with explicit skips for Linux privilege/Unix socket tests.
-Windows CI additionally exercises ACLs, shims, process trees and a clean pipx install.
-
-### Native Windows or WSL2
-
-For native Windows, install Python 3.11+, Git for Windows 2.38+, pipx or uv, and the
-official Codex CLI and Claude Code for the **same Windows user**. Clone this repository,
-open PowerShell or cmd in that clone, and run the lite installation above. No admin
-session or bash is needed by aao. After `aao doctor`, keep `aao serve` running and use
-`aao watch 1` in a second console. `watch-open` prints the command to run manually.
-
-Detection supports `.exe`, npm `.cmd` shims (launched through their Node script), and
-`.ps1` shims. PowerShell execution policy is respected; if a `.ps1` is blocked, use a
-native executable or an npm installation. Generic batch shims reject shell metacharacters;
-prefer `.exe`/`.ps1` when custom paths or arguments contain them. No sandbox is silently
-weakened to make a CLI run. [Official OpenAI documentation](https://learn.chatgpt.com/docs/windows/windows-sandbox)
-describes the native Codex sandbox. Use [WSL2](https://learn.chatgpt.com/docs/windows/wsl)
-when your Codex version/workflow requires a Linux sandbox or Linux tools. Install Git,
-Python, aao, Codex and Claude **together inside WSL2**, keep repositories in its Linux
-filesystem (for example `~/src`), and run the Linux lite instructions there. Native
-Windows and WSL2 have separate configuration, state, paths and logins; do not mix them.
-
-The Claude plugin uses executable/argument hooks, with `aao.exe` on PATH, so hooks run
-without a shell. On a recent Claude Code, use the PowerShell tool for slash commands;
-if needed enable it with `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. See the official
-[hook exec-form reference](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form)
-and [PowerShell tool reference](https://code.claude.com/docs/en/tools-reference#powershell-tool).
-
-Paths with spaces are passed as arguments; quote paths you type in the console.
-Files and subprocess streams use UTF-8, with CRLF accepted on input. Controlled Git
-operations enable `core.longpaths=true` and use `core.autocrlf=false` in isolated
-workspaces, without editing your Git settings. Python/third-party tools still depend
-on Windows long-path support; prefer a short state directory if a tool hits MAX_PATH.
-`aao doctor` reports that limit. Git storage uses copies on Windows (no Developer Mode
-or symlink privilege), so large repositories require additional disk space and I/O.
-
-For background operation, optionally install a current-user Task Scheduler logon task:
-
-```text
-aao service install --windows
-```
-
-This starts at your **next logon**, with your interactive token and least privilege,
-using the installed Python environment and explicit config path. Keep that environment
-installed. It stores no password, does not elevate, and runs only while logged on.
-To start immediately use `aao serve`; Ctrl+C or `aao stop` drains and then stops workers. Cancellation
-terminates the engine process tree; Windows Job Objects also clean descendants if the
-service exits. Remove automatic startup with `aao service uninstall --windows` (it
-leaves an already running process alone). Managed-device policy may reject registration;
-in that case use a console process. Linux/macOS lite users can keep `aao serve` in a
-terminal or configure their own user process supervisor.
-
 ## Quickstart: full mode
 
 Linux with systemd, Python 3.11+, git, the [Codex CLI](https://github.com/openai/codex) and
@@ -499,7 +444,7 @@ Try it without any account: `aao serve --dry-run` uses fake engines and no chat 
 
 ## Tutorial: your first task
 
-1. **Install and configure** with the [Quickstart](#quickstart). In `aao setup` choose the orchestrator, the Codex
+1. **Install and configure** with the [lite Quickstart](#quickstart-lite-mode-121) or the [full-mode Quickstart](#quickstart-full-mode). In `aao setup` choose the orchestrator, the Codex
    permissions ([modes](#permission-modes)), the chat channel and your repositories.
 2. **Log in to Codex** as the service user and install the Claude Code plugin (see the Quickstart steps).
 3. **Check** with `aao doctor` and fix anything it flags; `aao status --brief` shows the five-line summary.
@@ -696,7 +641,7 @@ Commands are registered in the bot menu. Portuguese aliases from the project's o
 
 ## CLI reference
 
-Every command is `aao <command>` (also installed as `ai-agents-orchestrator`). Portuguese aliases are accepted.
+Every command is `aao <command>` (also installed as `ai-agents-orchestrator`). Portuguese command and flag names (for example `--titulo`) are kept only as a **compatibility** alias; this reference and the docs use the English names.
 Use `aao --config PATH <command>` to select a config explicitly.
 
 | Command | Purpose |

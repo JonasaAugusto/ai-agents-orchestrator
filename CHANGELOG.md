@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- README: the lite Quickstart and the one-command install (`pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator`) are on the first screen; the comparison and the support policy moved to `docs/comparison.md` and `docs/support-policy.md` (with pt-BR copies).
+- The "Windows is not tested" text now matches the OS support table, the CI and 1.2.1; Python classifier is Beta.
+- `docs/first-10-minutes.md` recaptured for 1.2.1 with the lite path and a PowerShell note; broken `#quickstart` anchors fixed; `aao delegate` example now creates a real task; config example mode comment aligned with `aao setup`.
+- WhatsApp is flagged as optional and unofficial on the first screen; Portuguese CLI names documented as compatibility aliases; pt-BR README lists the English-only sections.
+
+### Added
+- `release.yml`: tag, build, GitHub Release and PyPI Trusted Publishing (off until `PUBLISH_TO_PYPI=true` and the PyPI project exists).
+
+## [Unreleased]
+
 ## [1.2.1] - 2026-11-12
 
 ### Native Windows lite mode

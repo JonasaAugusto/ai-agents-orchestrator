@@ -16,59 +16,140 @@ publicado sem a sua aprovação explícita.
 - **Sem chaves de API.** Usa os CLIs oficiais `codex` e `claude` com os seus logins.
 - **Você escolhe as permissões.** O Codex começa restrito (sandbox próprio, sem rede, clones descartáveis). Na sua própria máquina, pode receber as mesmas permissões do Claude ([Modos de permissão](#modos-de-permissão)). Nos dois casos, publicar exige um humano.
 - **Resultado honesto.** Tarefa cujo relatório diz `partial` ou `blocked` nunca aparece como concluída.
-- **Python com dependências mínimas.** No Windows, `tzdata` fornece os fusos IANA; WhatsApp é um extra opcional. A CI tem alvo Python 3.11–3.14 em Linux, macOS e Windows; o serviço privilegiado exige Linux/systemd.
+- **Python com dependências mínimas.** No Windows, `tzdata` fornece os fusos IANA; WhatsApp é um extra opcional e não oficial (o canal recomendado é o Telegram). A CI tem alvo Python 3.11–3.14 em Linux, macOS e Windows; o serviço privilegiado exige Linux/systemd.
 
 A documentação completa (tabelas de comandos, referência do CLI, configuração, FAQ) está no [README em inglês](README.md);
-este arquivo resume o essencial em português.
+este arquivo resume o essencial em português. Seções só em inglês: [Features](README.md#features), [Telegram commands](README.md#telegram-commands), [CLI reference](README.md#cli-reference), [Configuration](README.md#configuration), [FAQ](README.md#faq), [Roadmap](README.md#roadmap).
 
-Comece pelos [Primeiros 10 minutos](docs/first-10-minutes.md), com saída capturada sem credenciais.
+Comece pelo [Início rápido](#início-rápido-modo-leve-121) logo abaixo ou pelos [Primeiros 10 minutos](docs/first-10-minutes.md), com saída capturada sem credenciais.
 Veja também [contribuição](CONTRIBUTING.md), [conduta](CODE_OF_CONDUCT.md) e [segurança](SECURITY.md).
 
-## Comparação honesta
+## Início rápido: modo leve (1.2.1)
 
-Conferido nos READMEs oficiais vinculados em **12/11/2026**; não instalamos nem medimos as alternativas.
-As indicações de preferência são nossa interpretação dos fluxos documentados, sem ranking de qualidade.
-Aqui Hydra significa `Geraldlol/hydra` e codex-router significa `gitguffaw/codex-router`; existem homônimos.
+No Linux, macOS ou Windows, com Python 3.11+, Git 2.38+, Codex CLI e Claude Code instalados,
+execute como seu usuário normal:
 
-| Alternativa e fonte | O que faz bem segundo a documentação | Quando preferir |
-| --- | --- | --- |
-| [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc#readme) | Revisão, delegação em segundo plano, resgate e transferência de sessão dentro do Claude Code. | Integração direta da OpenAI sem adotar nosso modelo de serviço/daemon root. Já tem handoff; isso não é exclusivo nosso. |
-| [kingbootoshi/codex-orchestrator](https://github.com/kingbootoshi/codex-orchestrator#readme) | Agentes em tmux, paralelismo, acompanhamento e direcionamento de sessões. | Supervisionar vários workers de terminal é a prioridade e Bun/tmux cabem no ambiente. |
-| [jarrodwatts/claude-delegator](https://github.com/jarrodwatts/claude-delegator#readme) | Papéis especialistas e roteamento via MCP. O README atual informa arquivamento e incompatibilidade do Codex atual. | Estudar os prompts ou manter ambiente legado fixado; para adoção nova com Codex atual, o autor recomenda o plugin oficial acima. |
-| [mustafaakben/agent-codex](https://github.com/mustafaakben/agent-codex#readme) | Comandos, agentes, skills e templates de bootstrap/MCP com ativação explícita. | Fluxo centrado no plugin com integrações MCP, sem serviço persistente de revezamento. |
-| [madd86/codex-bridge](https://github.com/madd86/codex-bridge#readme) | Prompts contextualizados, delegação tmux e revisão supervisionada; o lançamento documentado usa `--yolo`. | Ponte pequena em ambiente local confiável, aceitando esse modo de permissão. |
-| [LegCLI](https://legcli.com/) | Monitora janelas de uso e troca modelos/agentes por uma escada configurada, preservando contexto no terminal. | Continuidade interativa entre CLIs é o principal; confira os termos comerciais atuais. |
-| [Hydra](https://github.com/Geraldlol/hydra#readme) | Sala persistente no VS Code, transcrição compartilhada e fases de planejamento, execução, verificação e revisão. | Colaboração dentro do editor e decisões registradas são mais úteis que um quadro com systemd. |
-| [codex-router](https://github.com/gitguffaw/codex-router#readme) | Delegação/revisão por políticas, seleção de modelo/esforço e jobs persistidos para Claude Code/Antigravity. | Roteamento e integração de hosts são o foco e você não precisa do nosso canal remoto. |
+```text
+pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator
+aao setup
+```
 
-Nosso foco é a combinação de **reserva com devolução ao coordenador**, branches isolados, aprovação de publicação
-presa ao SHA revisado e destino, canal remoto do dono e equilíbrio de uso medido. Veja [o fluxo](#como-funciona),
-[as limitações de segurança](SECURITY.md) e a [medição](README.md#usage-measurement-and-balance-110).
-Equilíbrio usa contadores e cotas configuradas: não otimiza valores em dinheiro nem promete economia.
-Um agente root pode burlar a aprovação da aplicação e o isolamento entre processos do mesmo UID é limitado.
-Serviço, daemon root e configuração têm custo de adoção; uma integração menor pode atender melhor uma sessão de revisão.
+Sem clonar, a linha acima instala a `main` mais recente. A partir de um clone, use `pipx install .`.
 
-## Política de versão e suporte
+Alternativa: `uv tool install git+https://github.com/JonasaAugusto/ai-agents-orchestrator` (ou `uv tool install .` num clone), seguido de `aao setup`. Os instaladores criam ambientes isolados.
+No Linux/macOS, dá para encadear: `pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator && aao setup`.
+No PowerShell 5.1 ou cmd, use os comandos separados acima (PowerShell 5.1 não aceita `&&`).
 
-- **SemVer**: em 1.x, comandos/configurações documentados e o contrato de tarefa/relatório/aprovação formam a interface
-  de compatibilidade. Internos Python, tabelas SQLite e protocolo do socket não são API pública. Correções de segurança
-  podem recusar operações inseguras antes aceitas; leia o CHANGELOG ao atualizar.
-- Só a **última versão publicada** recebe correções, inclusive de segurança. Sem LTS ou prazo garantido de resposta.
-  O badge aponta para releases publicados; o checkout pode conter mudanças ainda não publicadas. Não é selo de auditoria.
-- CI com alvo **Python 3.11–3.14 em Linux/macOS** para pacote, testes e exemplo offline. Serviço/daemon e unidades
-  exigem **Linux/systemd**; passar testes no macOS não certifica operação do serviço ali. Windows não é testado e WSL
-  não tem certificação separada. Informe também versões dos CLIs externos ao relatar problemas.
-- Núcleo suportado: delegação, revisão, defaults restritos e publicação aprovada pelo dono. **`/codex-pane` e wake-up
-  interativo são experimentais**, desligados por padrão e sem garantia de compatibilidade. WhatsApp é opcional e
-  não oficial. Equilíbrio exige calibração; cota desconhecida continua desconhecida.
+O pacote ainda não está no PyPI (o workflow de publicação já está pronto e fica desligado até o projeto existir no PyPI). O diretório de ferramentas do pipx ou uv precisa
+estar no PATH. Escolha **lite**, o coordenador (`claude` ou `codex`) e os repositórios
+GitHub ou clones locais. O setup detecta os dois CLIs, verifica login com
+`codex login status` e `claude auth status` e instala o plugin pelos comandos oficiais
+do marketplace do Claude. Nunca lê nem copia arquivos de credenciais. Informa como
+resolver CLI ou login ausente e falhas de instalação do plugin; depois, rode setup
+novamente. A segunda execução preserva configuração, regras e logins. Para mudar as
+escolhas, edite a configuração explicitamente.
+Selecione o diretório de transcrições do projeto Claude para limitar o contexto espelhado a esse projeto.
 
-Para repetir o teste automatizado: `sh scripts/clean-install-test.sh --empty`.
-Ele cria venv/HOME/estado/Git descartáveis, instala o pacote, roda setup sem interação e doctor, simula uma tarefa
-com Codex falso e valida o plugin estaticamente. Doctor deve indicar os pré-requisitos ausentes; o teste confere
-exatamente essas falhas, sem ocultar outras. Não valida login real, serviços operacionais ou carregamento no Claude.
-CI também testa instalação a partir de wheel/sdist e usa containers Python slim sem agentes instalados.
-O setup sem interação exige diretório do usuário atual, sem escrita para grupo/outros, e cria configuração de forma
-exclusiva, preservando arquivos existentes.
+```bash
+aao doctor
+aao serve
+# Deixe serve aberto; use outro terminal ou /delegate no Claude Code:
+aao delegate --repo myrepo --title "Adicionar health check" --briefing-text "Adicione GET /health retornando 200 e um teste."
+aao status --brief
+aao result 1
+aao review --repo meu-repo --branch agent/1-minha-tarefa
+```
+
+`aao serve` roda em um processo de usuário, com threads e subprocessos dos motores.
+Dispensa root e systemd, recusa root no modo leve e impede dois serviços no mesmo
+diretório de estado. Delegação, resultado, revisão cruzada, briefing, passagem após
+limite e `hook-prompt` usam a mesma fila do modo completo. Os dois coordenadores podem
+usar o CLI; não há canal remoto no modo leve. Ctrl+C encerra o serviço. Enquanto ele
+estiver fechado, nada executa; fila e agendamentos persistidos voltam na próxima partida.
+
+Após a revisão, **o humano** executa `aao publish <id>` em um terminal interativo.
+O comando mostra repositório, destino e SHA completo e exige digitar `<id> <SHA-completo>`.
+Pipes e a flag `--approved-by-owner` sozinha são recusados. Mudanças na branch ou no
+destino invalidam a aprovação. A publicação integra com a base atual do remoto e faz
+push sem force; conflitos e avanço concorrente do remoto impedem o envio. As branches
+dos agentes ficam locais até a aprovação. Repositórios somente locais entregam branch
+e patch para integração manual. O comando publica histórico Git, não faz deploy.
+
+O arquivo gerado contém `mode = "lite"` no topo. Padrões:
+`~/.config/ai-agents-orchestrator/config.toml` e
+`~/.local/state/ai-agents-orchestrator`, respeitando `XDG_CONFIG_HOME` e `XDG_STATE_HOME`.
+`AAO_CONFIG` seleciona outro arquivo; configurações de sistema existentes continuam
+compatíveis. O modo leve usa HOME, PATH e CODEX_HOME do usuário, incluindo Homebrew.
+No Windows, a configuração fica em `%LOCALAPPDATA%\ai-agents-orchestrator\config.toml`
+e o estado em `%LOCALAPPDATA%\ai-agents-orchestrator\state`.
+O socket fica no diretório de estado; `paths.socket` permite encurtar caminhos longos.
+Usa `getpeereid` no macOS e `SO_PEERCRED` no Linux. No Windows, TCP somente em
+`127.0.0.1`, com token aleatório novo por processo e arquivo com ACL exclusiva do usuário
+(não compartilhe esse arquivo). `service.local_transport = "tcp"` também ativa esse
+transporte no POSIX; os comandos do CLI e hooks são os mesmos. O espelho atualiza sob demanda,
+sem depender de inotify.
+
+**O modo leve não isola os agentes da sua conta, arquivos ou credenciais Git.** Código
+sob o mesmo usuário pode alterar o estado ou simular aprovação. A confirmação é uma
+proteção do fluxo humano, não uma barreira contra código malicioso com o mesmo uid.
+Não há botão Publicar nem executor de deploy. O modo completo mantém o daemon
+privilegiado, estado protegido e canal remoto opcional. `aao doctor` explica o modo
+ativo e esses limites. A CI cobre modo leve Linux/macOS e suíte no Windows com Python
+3.11–3.14, com skips explícitos para privilégios Linux e sockets Unix. No Windows,
+também verifica ACLs, shims, encerramento da árvore e instalação limpa com pipx.
+
+### Windows nativo ou WSL2
+
+No Windows nativo, instale Python 3.11+, Git for Windows 2.38+, pipx ou uv, Codex CLI e
+Claude Code oficiais para o **mesmo usuário Windows**. Clone este repositório e abra
+PowerShell ou cmd na pasta do clone. Siga a instalação leve acima, sem administrador
+nem bash para o aao. Rode `aao doctor`, mantenha `aao serve` aberto e use `aao watch 1`
+em outro console. `watch-open` mostra o comando para abrir manualmente.
+
+A detecção aceita `.exe`, shims npm `.cmd` (executados pelo script Node) e `.ps1`.
+A política de execução do PowerShell é respeitada; se bloquear `.ps1`, use executável
+nativo ou instalação npm. Shims batch genéricos recusam metacaracteres de shell;
+prefira `.exe`/`.ps1` para caminhos ou argumentos personalizados que os contenham.
+A compatibilidade nunca desliga a sandbox automaticamente. A [documentação oficial
+OpenAI](https://learn.chatgpt.com/docs/windows/windows-sandbox) descreve a sandbox
+Windows. Use [WSL2](https://learn.chatgpt.com/docs/windows/wsl) quando a versão ou fluxo
+do Codex exigir sandbox ou ferramentas Linux. Instale Git, Python, aao, Codex e Claude
+**juntos dentro do WSL2**, mantenha os repositórios no filesystem Linux (ex.: `~/src`)
+e siga o modo leve Linux. Windows nativo e WSL2 têm configuração, estado, caminhos e
+logins separados; não misture os ambientes.
+
+O plugin Claude usa hooks com executável e argumentos, com `aao.exe` no PATH, sem
+shell. No Claude Code recente, execute os comandos pelo PowerShell; se necessário,
+ative `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Consulte as referências oficiais de
+[hooks](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form) e
+[PowerShell](https://code.claude.com/docs/en/tools-reference#powershell-tool).
+
+Caminhos com espaços são argumentos separados; coloque entre aspas os que digitar.
+Arquivos e subprocessos usam UTF-8 e aceitam CRLF na entrada. Operações Git controladas
+ativam `core.longpaths=true` e `core.autocrlf=false` nos workspaces isolados, sem alterar
+suas configurações Git. Python e ferramentas externas ainda dependem do suporte do
+Windows a caminhos longos; prefira estado em um caminho curto se algum atingir MAX_PATH.
+O doctor informa essa limitação. O Git isolado usa cópias no Windows, sem exigir
+Developer Mode nem privilégio de symlink; repos grandes consomem mais disco e I/O.
+
+Para iniciar em segundo plano no logon, opcionalmente execute:
+
+```text
+aao service install --windows
+```
+
+A tarefa do Task Scheduler começa no **próximo logon**, com token interativo do usuário,
+privilégio mínimo, Python instalado e caminho explícito da configuração. Preserve esse
+ambiente instalado. Não armazena senha nem eleva privilégios; depende do usuário logado.
+Para iniciar agora, use `aao serve`. Ctrl+C ou `aao stop` aguarda o trabalho e encerra os workers.
+Cancelamento termina a árvore do motor; Job Objects do Windows também limpam descendentes
+se o serviço sair. `aao service uninstall --windows` remove o início automático sem
+parar um processo já aberto. Se a política da máquina recusar o registro, use o console.
+No Linux/macOS leve, mantenha `aao serve` no terminal ou configure seu supervisor de usuário.
+
+## Comparação e suporte
+
+As diferenças para as alternativas estão na [comparação honesta](docs/comparison.pt-BR.md); versões, sistemas suportados e o teste de instalação, na [política de suporte](docs/support-policy.pt-BR.md).
 
 ## Como funciona
 
@@ -198,7 +279,7 @@ sem supervisão, mantenha os segredos fora do alcance e a lista de publicação 
 ## Modelo de segurança (padrões)
 
 Estes são os padrões do modo completo com permissões restritas do Codex; os [Modos de permissão](#modos-de-permissão)
-explicam como relaxá-los. Os limites do modo leve estão no [início rápido](#início-rápido-modo-leve-120).
+explicam como relaxá-los. Os limites do modo leve estão no [início rápido](#início-rápido-modo-leve-121).
 
 Codex como usuário sem privilégio (`aao`), `workspace-write` **sem rede**; `danger-full-access` só com
 `codex.full_access = true` (opt-in explícito, com aviso); publicar sempre exige humano; nada vai ao GitHub fora de
@@ -232,127 +313,6 @@ pelo CLI (leve) ou canal de chat (completo, Telegram ou WhatsApp) e usa o Claude
 
 A CI de Windows/macOS precisa passar antes de anunciar a versão como validada nesses sistemas.
 O daemon root, a separação de privilégios e o botão Publicar remoto continuam exclusivos do Linux.
-
-## Início rápido: modo leve (1.2.1)
-
-No Linux, macOS ou Windows, com Python 3.11+, Git 2.38+, Codex CLI e Claude Code instalados,
-execute **no clone deste repositório**, como seu usuário normal:
-
-```text
-pipx install .
-aao setup
-```
-
-Alternativa: `uv tool install .`, seguido de `aao setup`. Os instaladores criam ambientes isolados.
-No Linux/macOS, a linha única equivalente é `pipx install . && aao setup`.
-No PowerShell 5.1 ou cmd, use os comandos separados acima (PowerShell 5.1 não aceita `&&`).
-
-O pacote ainda não está no PyPI. O diretório de ferramentas do pipx ou uv precisa
-estar no PATH. Escolha **lite**, o coordenador (`claude` ou `codex`) e os repositórios
-GitHub ou clones locais. O setup detecta os dois CLIs, verifica login com
-`codex login status` e `claude auth status` e instala o plugin pelos comandos oficiais
-do marketplace do Claude. Nunca lê nem copia arquivos de credenciais. Informa como
-resolver CLI ou login ausente e falhas de instalação do plugin; depois, rode setup
-novamente. A segunda execução preserva configuração, regras e logins. Para mudar as
-escolhas, edite a configuração explicitamente.
-Selecione o diretório de transcrições do projeto Claude para limitar o contexto espelhado a esse projeto.
-
-```bash
-aao doctor
-aao serve
-# Deixe serve aberto; use outro terminal ou /delegate no Claude Code:
-aao delegate --help
-aao status --brief
-aao result 1
-aao review --repo meu-repo --branch agent/1-minha-tarefa
-```
-
-`aao serve` roda em um processo de usuário, com threads e subprocessos dos motores.
-Dispensa root e systemd, recusa root no modo leve e impede dois serviços no mesmo
-diretório de estado. Delegação, resultado, revisão cruzada, briefing, passagem após
-limite e `hook-prompt` usam a mesma fila do modo completo. Os dois coordenadores podem
-usar o CLI; não há canal remoto no modo leve. Ctrl+C encerra o serviço. Enquanto ele
-estiver fechado, nada executa; fila e agendamentos persistidos voltam na próxima partida.
-
-Após a revisão, **o humano** executa `aao publish <id>` em um terminal interativo.
-O comando mostra repositório, destino e SHA completo e exige digitar `<id> <SHA-completo>`.
-Pipes e a flag `--approved-by-owner` sozinha são recusados. Mudanças na branch ou no
-destino invalidam a aprovação. A publicação integra com a base atual do remoto e faz
-push sem force; conflitos e avanço concorrente do remoto impedem o envio. As branches
-dos agentes ficam locais até a aprovação. Repositórios somente locais entregam branch
-e patch para integração manual. O comando publica histórico Git, não faz deploy.
-
-O arquivo gerado contém `mode = "lite"` no topo. Padrões:
-`~/.config/ai-agents-orchestrator/config.toml` e
-`~/.local/state/ai-agents-orchestrator`, respeitando `XDG_CONFIG_HOME` e `XDG_STATE_HOME`.
-`AAO_CONFIG` seleciona outro arquivo; configurações de sistema existentes continuam
-compatíveis. O modo leve usa HOME, PATH e CODEX_HOME do usuário, incluindo Homebrew.
-No Windows, a configuração fica em `%LOCALAPPDATA%\ai-agents-orchestrator\config.toml`
-e o estado em `%LOCALAPPDATA%\ai-agents-orchestrator\state`.
-O socket fica no diretório de estado; `paths.socket` permite encurtar caminhos longos.
-Usa `getpeereid` no macOS e `SO_PEERCRED` no Linux. No Windows, TCP somente em
-`127.0.0.1`, com token aleatório novo por processo e arquivo com ACL exclusiva do usuário
-(não compartilhe esse arquivo). `service.local_transport = "tcp"` também ativa esse
-transporte no POSIX; os comandos do CLI e hooks são os mesmos. O espelho atualiza sob demanda,
-sem depender de inotify.
-
-**O modo leve não isola os agentes da sua conta, arquivos ou credenciais Git.** Código
-sob o mesmo usuário pode alterar o estado ou simular aprovação. A confirmação é uma
-proteção do fluxo humano, não uma barreira contra código malicioso com o mesmo uid.
-Não há botão Publicar nem executor de deploy. O modo completo mantém o daemon
-privilegiado, estado protegido e canal remoto opcional. `aao doctor` explica o modo
-ativo e esses limites. A CI cobre modo leve Linux/macOS e suíte no Windows com Python
-3.11–3.14, com skips explícitos para privilégios Linux e sockets Unix. No Windows,
-também verifica ACLs, shims, encerramento da árvore e instalação limpa com pipx.
-
-### Windows nativo ou WSL2
-
-No Windows nativo, instale Python 3.11+, Git for Windows 2.38+, pipx ou uv, Codex CLI e
-Claude Code oficiais para o **mesmo usuário Windows**. Clone este repositório e abra
-PowerShell ou cmd na pasta do clone. Siga a instalação leve acima, sem administrador
-nem bash para o aao. Rode `aao doctor`, mantenha `aao serve` aberto e use `aao watch 1`
-em outro console. `watch-open` mostra o comando para abrir manualmente.
-
-A detecção aceita `.exe`, shims npm `.cmd` (executados pelo script Node) e `.ps1`.
-A política de execução do PowerShell é respeitada; se bloquear `.ps1`, use executável
-nativo ou instalação npm. Shims batch genéricos recusam metacaracteres de shell;
-prefira `.exe`/`.ps1` para caminhos ou argumentos personalizados que os contenham.
-A compatibilidade nunca desliga a sandbox automaticamente. A [documentação oficial
-OpenAI](https://learn.chatgpt.com/docs/windows/windows-sandbox) descreve a sandbox
-Windows. Use [WSL2](https://learn.chatgpt.com/docs/windows/wsl) quando a versão ou fluxo
-do Codex exigir sandbox ou ferramentas Linux. Instale Git, Python, aao, Codex e Claude
-**juntos dentro do WSL2**, mantenha os repositórios no filesystem Linux (ex.: `~/src`)
-e siga o modo leve Linux. Windows nativo e WSL2 têm configuração, estado, caminhos e
-logins separados; não misture os ambientes.
-
-O plugin Claude usa hooks com executável e argumentos, com `aao.exe` no PATH, sem
-shell. No Claude Code recente, execute os comandos pelo PowerShell; se necessário,
-ative `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`. Consulte as referências oficiais de
-[hooks](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form) e
-[PowerShell](https://code.claude.com/docs/en/tools-reference#powershell-tool).
-
-Caminhos com espaços são argumentos separados; coloque entre aspas os que digitar.
-Arquivos e subprocessos usam UTF-8 e aceitam CRLF na entrada. Operações Git controladas
-ativam `core.longpaths=true` e `core.autocrlf=false` nos workspaces isolados, sem alterar
-suas configurações Git. Python e ferramentas externas ainda dependem do suporte do
-Windows a caminhos longos; prefira estado em um caminho curto se algum atingir MAX_PATH.
-O doctor informa essa limitação. O Git isolado usa cópias no Windows, sem exigir
-Developer Mode nem privilégio de symlink; repos grandes consomem mais disco e I/O.
-
-Para iniciar em segundo plano no logon, opcionalmente execute:
-
-```text
-aao service install --windows
-```
-
-A tarefa do Task Scheduler começa no **próximo logon**, com token interativo do usuário,
-privilégio mínimo, Python instalado e caminho explícito da configuração. Preserve esse
-ambiente instalado. Não armazena senha nem eleva privilégios; depende do usuário logado.
-Para iniciar agora, use `aao serve`. Ctrl+C ou `aao stop` aguarda o trabalho e encerra os workers.
-Cancelamento termina a árvore do motor; Job Objects do Windows também limpam descendentes
-se o serviço sair. `aao service uninstall --windows` remove o início automático sem
-parar um processo já aberto. Se a política da máquina recusar o registro, use o console.
-No Linux/macOS leve, mantenha `aao serve` no terminal ou configure seu supervisor de usuário.
 
 ## Início rápido: modo completo
 
@@ -401,7 +361,7 @@ nenhuma: `aao serve --dry-run`.
 
 ## Tutorial: a primeira tarefa
 
-1. **Instale e configure** pelo [Início rápido](#início-rápido). No `aao setup` escolha o orquestrador, as permissões do
+1. **Instale e configure** pelo [Início rápido](#início-rápido-modo-leve-121) ou o [modo completo](#início-rápido-modo-completo). No `aao setup` escolha o orquestrador, as permissões do
    Codex ([modos](#modos-de-permissão)), o canal de chat e os repositórios.
 2. **Faça o login do Codex** como o usuário do serviço e instale o plugin do Claude Code (passos do Início rápido).
 3. **Confira** com `aao doctor` e corrija o que ele apontar; `aao status --brief` mostra o resumo de cinco linhas.

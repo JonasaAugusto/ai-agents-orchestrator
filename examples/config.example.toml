@@ -1,5 +1,5 @@
 # ai-agents-orchestrator - example configuration
-# Copy to /etc/ai-agents-orchestrator/config.toml (mode 0644, owner root) or run `aao setup`.
+# Copy to /etc/ai-agents-orchestrator/config.toml (mode 0640, root:<service group>; `aao setup` writes 0640, or 0600 in lite mode) or run `aao setup`.
 # Every key can be overridden with an environment variable: AAO_<SECTION>_<KEY>, e.g. AAO_SERVICE_TASKS_PER_HOUR=3.
 #
 # SECRETS DO NOT GO HERE. Put them in /etc/ai-agents-orchestrator/env (mode 0600, owner root), loaded by systemd:

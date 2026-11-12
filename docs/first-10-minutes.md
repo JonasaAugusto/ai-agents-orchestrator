@@ -2,7 +2,7 @@
 
 Try the task lifecycle before connecting accounts or installing a service. This walkthrough uses synthetic code
 and fake agents. It cannot prove that your Claude Code login, plugin loader, live hooks or production daemon work.
-Commands below are for a Linux/macOS shell with Git and Python 3.11–3.14, including `venv`/pip support.
+Commands below are for a Linux/macOS shell (a PowerShell variant follows) with Git and Python 3.11–3.14, including `venv`/pip support.
 Build-tool downloads require network; the fake task does not. Times are a guide, not a benchmark.
 
 ## Minutes 0–2: install locally
@@ -16,10 +16,13 @@ python -m pip install .
 aao --version
 ```
 
+On native Windows, open PowerShell in the clone and use `py -3 -m venv .venv`, then `.venv\Scripts\Activate.ps1`,
+then `python -m pip install .` (run each command on its own line; PowerShell 5.1 has no `&&`).
+
 Captured from the development checkout on Linux/Python 3.14, 2026-11-12:
 
 ```text
-1.1.0
+1.2.1
 ```
 
 The checkout may contain unreleased changes. For a published release use the release selector on GitHub; compare
@@ -91,10 +94,21 @@ and bundled rules; install the plugin separately from the marketplace/checkout w
 
 ## Minutes 8–10: choose the next step
 
-- For a small review-only integration, read the [honest comparison](../README.md#honest-comparison--comparação-honesta)
-  before choosing a persistent service.
-- For real use, follow [Quickstart](../README.md#quickstart) on Linux/systemd, choose an unprivileged service user,
-  and run interactive `aao setup`. Configure only disposable repos first. Run `aao doctor` and address its failures
-  before enabling the service. Account authentication and actual plugin loading require your own session.
-- For contributing, follow [CONTRIBUTING](../CONTRIBUTING.md). CI covers Linux/macOS × Python 3.11–3.14, empty
-  Linux containers and built wheel/sdist installs; macOS tests do not certify a macOS service deployment.
+- For a small review-only integration, read the [honest comparison](comparison.md) before choosing a persistent service.
+- For real use, the recommended path is **lite mode**, with no root and no systemd, on Linux, macOS or Windows:
+
+  ```text
+  pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator
+  aao setup
+  aao doctor
+  aao serve
+  ```
+
+  Then, in another terminal, `aao delegate --repo myrepo --title "Add a health check" --briefing-text "Add GET /health and a test."`.
+  See the [lite Quickstart](../README.md#quickstart-lite-mode-121) (including native Windows and WSL2). Configure only
+  disposable repos first. Account authentication and actual plugin loading require your own session.
+- For the privileged full mode (Linux/systemd, remote Publish button), follow the
+  [full-mode Quickstart](../README.md#quickstart-full-mode) and choose an unprivileged service user.
+- For contributing, follow [CONTRIBUTING](../CONTRIBUTING.md). CI covers Python 3.11–3.14: the full suite on Linux,
+  lite mode on Linux, macOS and Windows, empty Linux containers and built wheel/sdist installs. See the
+  [support policy](support-policy.md).
