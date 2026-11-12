@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Reliability and context economy
+
+- Wait for task completion on a single socket request; notify waiters on state changes and service shutdown.
+- Deliver bounded unread-note deltas, acknowledging only complete entries on first delivery; retain overflow and
+  new results for later hooks. Keep generated notes bounded and remove repeated command boilerplate.
+- Resume saved engine sessions with delta prompts and live workspace base rules. Preserve cross-review threads
+  across the existing single automatic timeout/restart retry budget.
+- Check service/root-daemon sockets, the live briefing and installed current plugin hooks in doctor. Add
+  `doctor --fix` for missing directories and bundled example rules, preserving existing files and service state.
+- Follow file metadata every 2.5 seconds in watch, rereading SQLite only on event/checkpoint changes. Persist task
+  state events so early failures and cancellations also finish followers.
+
 ## [1.1.0] - 2026-11-12
 
 ### Usage measurement and balance

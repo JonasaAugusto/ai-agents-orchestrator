@@ -79,6 +79,10 @@ continue without an interactive Claude session. This setting is independent of t
 
 A restart or timeout automatically retries a queued task **once**, sharing the retry budget, with the saved engine
 session and workspace. Timeout resumption says “finish and report”; another interruption blocks the task for review.
+Cross-reviews also reuse their saved thread. When a saved session exists, the resume prompt contains the current
+snapshot, live briefing/checkpoint references and owner instructions, rather than repeating the original task and
+base rules. Base rules are copied into the workspace's untracked `AGENTS.md` together with per-repo instructions;
+a repository's tracked `AGENTS.md` is preserved. Without a saved session the service sends the full task prompt.
 The default task timeout is **3600 seconds**, configurable with `service.task_timeout`,
 `AAO_SERVICE_TASK_TIMEOUT`, or the legacy `FALLBACK_TASK_TIMEOUT` (the AAO variable wins).
 `aao status --brief` shows `retomada agendada: Claude HH:MM / Codex HH:MM` in the configured timezone (`-` means none);
@@ -227,7 +231,15 @@ sudo aao doctor
 
 It checks the config, the service user, Codex installed and logged in, Claude Code and its hooks, the chat channel
 (token, owner id, 0600 secrets file, WhatsApp opt-in), git access to every repository and the push allowlist, and
-prints a fix for each problem. `aao doctor --json` for scripts.
+prints a fix for each problem. It also checks whether the service and root-daemon sockets accept connections,
+whether the live `BRIEFING.md` exists, and whether all current plugin hooks are present (including the Stop usage
+hook). An enabled plugin name alone does not prove its hooks are installed: doctor inspects the installed 1.1.0+
+manifest and hook file. `aao doctor --json` is available for scripts.
+
+`aao doctor --fix` creates missing state directories and copies bundled example base/division rules only when the
+destination is absent. Adapt the examples to your team. It preserves existing files and never creates a briefing,
+changes credentials, starts services or restarts them. Offline services still appear as failures after the fix;
+check again after the operator has started them.
 
 **5. Start the services** (examples with placeholders in [`examples/systemd/`](examples/systemd))
 
@@ -272,6 +284,12 @@ The `aao` CLI must be on PATH. It installs:
 - **Hooks**: `StopFailure` (`rate_limit`) runs `aao claude-limit`; `UserPromptSubmit` and `SessionStart` run
   `aao hook-prompt`, which delivers pending notes from Codex and a reminder when the briefing is stale.
 - **Slash commands**: `/delegate <repo> <task>`, `/orchestrator-status`, `/review-task <id>`, `/codex [id]`.
+
+`aao wait ID` blocks on a service socket notification instead of repeatedly querying the task. `--timeout S` bounds
+the wait; exit codes remain 0 for review/completed, 1 for blocked/cancelled, and 2 for timeout/service errors.
+Notes deliver only unread tasks and acknowledge complete entries on first delivery. Hook output is capped at
+3000 characters (2500 for the prompt hook); overflow stays unread for later delivery. A new result for an already
+seen task becomes unread again. The human-readable note also contains only unread tasks, capped at 12000 characters.
 
 An **experimental** companion, `aao-codex-pane`, adds `/codex-pane [id]`: a live side pane inside Claude Code. It is
 built on Claude Code's early-access function-hooks API, which may change between releases:
@@ -339,7 +357,9 @@ separate human approval.
 ## Watching Codex live
 
 The service appends every Codex event of a task, masked, to `<state_dir>/resultados/<id>/events.jsonl`. Watching only
-reads that file: it never interferes with the task, and you can replay a finished task later.
+reads local files: it never interferes with the task, and you can replay a finished task later. State changes are
+also recorded, so even a task that fails before the engine starts can finish the view. The follower checks file
+metadata every 2.5 seconds and rereads SQLite only when the event log or checkpoint changes.
 
 - `aao watch [id]`: header (task, repo, branch, workspace), the events so far, then follows until the task ends,
   finishing with the diff so far. Default id: the running task. `--no-follow` prints and exits.
@@ -426,7 +446,7 @@ Every command is `aao <command>` (also installed as `ai-agents-orchestrator`). P
 
 | Command | Purpose |
 | --- | --- |
-| `setup`, `doctor [--json]` | configure; check and get fix instructions |
+| `setup`, `doctor [--json] [--fix]` | configure; check and optionally create missing directories/example rules |
 | `serve [--dry-run] [--no-chat]` | run the service |
 | `root-daemon` | run the optional privileged daemon |
 | `delegate --repo R --title T [--files a,b] [--briefing FILE \| --briefing-text TXT] [--description D] [--priority N]` | queue a task for Codex |

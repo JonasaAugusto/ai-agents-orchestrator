@@ -171,14 +171,24 @@ def preparar_workspace(cfg: Config, repo: str, tid: int, titulo: str, base_ref: 
 def instalar_agents_md(cfg: Config, ws: Path, repo: str, templates: Path | None = None) -> bool:
     """Per-repo instructions: copies `<templates_dir>/AGENTS.<repo>.md` to `AGENTS.md` at the workspace root (Codex reads
     the AGENTS.md of its cwd). It stays OUT of the commit (.git/info/exclude) and never overwrites an AGENTS.md the
-    repo itself versions. No template: nothing. True if written."""
+    repo itself versions. Includes the live base rules, even without a per-repo template. True if written."""
     origem = (templates or cfg.templates_dir) / f"AGENTS.{repo}.md"
-    if not origem.is_file():
-        return False
     if git(cfg, ["ls-files", "--error-unmatch", "--", "AGENTS.md"], ws, check=False).returncode == 0:
         return False
-    texto = origem.read_text(encoding="utf-8")
+    texto = origem.read_text(encoding="utf-8") if origem.is_file() else ""
+    try:
+        base = cfg.rules_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        base = ""
+    except OSError as e:
+        raise GitErro("cannot read the configured base rules") from e
+    if base:
+        texto = base.rstrip() + ("\n\n" + texto if texto else "\n")
+    if not texto:
+        return False
     destino = ws / "AGENTS.md"
+    if destino.is_symlink():
+        destino.unlink()  # never follow an agent-controlled link while copying service rules
     if not destino.is_file() or destino.read_text(encoding="utf-8") != texto:
         destino.write_text(texto, encoding="utf-8")
     excl = ws / ".git" / "info" / "exclude"
