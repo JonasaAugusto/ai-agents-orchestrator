@@ -167,11 +167,11 @@ def texto_pr(cfg: Config, t: dict, aprovacao: dict, arquivos: list[str]) -> tupl
     linhas = [f"Opened by AI Agents Orchestrator for task #{t['id']}.", "",
               f"- Commit: `{aprovacao['commit']}`", f"- Base: `{aprovacao['destino']}`",
               f"- Branch: `{aprovacao['branch']}`", "", "Changed files:"]
-    linhas += [f"- `{a}`" for a in arquivos[:50]]
+    linhas += [f"- `{sanitize.mascarar(a, dev=True)}`" for a in arquivos[:50]]  # the SHA stays intact: never mask it
     if len(arquivos) > 50:
         linhas.append(f"- ... and {len(arquivos) - 50} more")
     linhas += ["", "Review the diff before merging; nothing was merged by the orchestrator."]
-    return titulo, sanitize.mascarar("\n".join(linhas), dev=True)
+    return titulo, "\n".join(linhas)
 
 
 def abrir_pr(cfg: Config, quadro: Quadro, root, tid: int, agora: float, aprovacao: dict | None = None, gh=None) -> dict:
