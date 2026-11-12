@@ -431,6 +431,7 @@ def parser() -> argparse.ArgumentParser:
     pb.add_argument("id", type=int)
     pb.add_argument("--approved-by-owner", "--autorizado-pelo-dono", dest="autorizado", action="store_true",
                     help="deprecated, ignored: the owner must confirm interactively")
+    _sub(sp, "mcp", help="run a minimal MCP server on stdio (delegate, status, result, review; never publishes)")
     cl = _sub(sp, "claim", "reivindicar", help="take a task (default owner: claude)")
     cl.add_argument("id", type=int)
     cl.add_argument("--owner", "--dono", dest="dono", default="claude", choices=["claude", "codex"])
@@ -557,6 +558,9 @@ def main(argv=None) -> int:
         linhas = p.read_text(encoding="utf-8").splitlines()
         print(f"ok: {len(linhas)} lines" + (" (more than 40: trim it)" if len(linhas) > 40 else ""))
         return 0
+    if cmd == "mcp":
+        from . import mcp
+        return mcp.serve(lambda req: chamar(cfg, req))
     if cmd == "publish":
         return _publicar(cfg, a.id, a.autorizado)
     if cmd == "wait":

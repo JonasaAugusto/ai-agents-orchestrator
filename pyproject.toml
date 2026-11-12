@@ -70,7 +70,7 @@ select = ["E9", "F"]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["src/ai_agents_orchestrator/assistente.py", "scripts/clean_install_test.py", "examples/offline_relay.py"]
+files = ["src/ai_agents_orchestrator/assistente.py", "src/ai_agents_orchestrator/mcp.py", "scripts/clean_install_test.py", "examples/offline_relay.py"]
 follow_imports = "silent"
 ignore_missing_imports = true
 warn_unused_ignores = true

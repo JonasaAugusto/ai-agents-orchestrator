@@ -497,6 +497,21 @@ built on Claude Code's early-access function-hooks API, which may change between
 /plugin install aao-codex-pane --marketplace JonasaAugusto/ai-agents-orchestrator
 ```
 
+### MCP server (`aao mcp`)
+
+`aao mcp` is a minimal [MCP](https://modelcontextprotocol.io) server on stdio (Python standard library only). It exposes
+only what the CLI already does safely: `delegate` (repo, title, briefing, files, priority, `model`, `effort`),
+`status`, `result` (short form) and `review`. There is **no publish tool**: merging and pushing stays a human
+approval in the CLI (`aao publish`). The service must be running (`aao serve`).
+
+```bash
+claude mcp add aao -- aao mcp                      # Claude Code (add --scope user for every project)
+codex mcp add aao -- aao mcp                       # Codex CLI
+```
+
+Other clients: register a stdio server whose command is `aao` with the single argument `mcp`
+(for example `{"mcpServers": {"aao": {"command": "aao", "args": ["mcp"]}}}`; add `"--config", "<path>"` before `mcp` to pick a config).
+
 <!-- spend-policy:start -->
 ## Spend policy
 
@@ -663,6 +678,7 @@ Use `aao --config PATH <command>` to select a config explicitly.
 
 | Command | Purpose |
 | --- | --- |
+| `mcp` | MCP server on stdio: delegate, status, result, review (never publishes) |
 | `setup`, `doctor [--json] [--fix]` | configure; check and optionally create missing directories/example rules |
 | `serve [--dry-run] [--no-chat]` | run the service |
 | `stop` | gracefully stop the lite user process |

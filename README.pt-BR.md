@@ -393,6 +393,21 @@ segredos, serializar tarefas que tocam os mesmos arquivos), os hooks (`StopFailu
 lateral ao vivo (API em acesso antecipado do Claude Code, pode mudar):
 `/plugin install aao-codex-pane --marketplace JonasaAugusto/ai-agents-orchestrator`.
 
+### Servidor MCP (`aao mcp`)
+
+`aao mcp` é um servidor [MCP](https://modelcontextprotocol.io) mínimo em stdio (só biblioteca padrão do Python). Expõe
+apenas o que a CLI já faz com segurança: `delegate` (repo, title, briefing, files, priority, `model`, `effort`),
+`status`, `result` (forma curta) e `review`. **Não há ferramenta de publicação**: merge e push continuam exigindo a
+aprovação humana na CLI (`aao publish`). O serviço precisa estar rodando (`aao serve`).
+
+```bash
+claude mcp add aao -- aao mcp                      # Claude Code (use --scope user para todos os projetos)
+codex mcp add aao -- aao mcp                       # Codex CLI
+```
+
+Outros clientes: registre um servidor stdio cujo comando seja `aao` com o único argumento `mcp`
+(por exemplo `{"mcpServers": {"aao": {"command": "aao", "args": ["mcp"]}}}`; coloque `"--config", "<caminho>"` antes de `mcp` para escolher a configuração).
+
 <!-- spend-policy:start -->
 ## Política de gasto
 

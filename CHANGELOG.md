@@ -5,6 +5,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `aao mcp`: minimal MCP server on stdio (standard library only) with `delegate` (including `model`/`effort`), `status`, `result` and `review`. It never publishes; publishing stays a human approval in the CLI. Registration: `claude mcp add aao -- aao mcp`.
+
 ## [1.3.0] - 2026-11-12
 
 ### Added
