@@ -32,11 +32,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Skill v1.1 part B: Codex owns suite execution and red/green/mutation evidence, reports in at most 20 lines;
+  Claude requests Codex cross-review before reading reports/source and opens only risk files. Fixed delegation
+  briefings are at most 15 lines, with stable repository context in `AGENTS.<repo>.md` and no pasted code/diffs.
+  Routing defaults to Codex for tasks that fit; status uses `--brief` and hook notes take precedence over waiting.
+- CLI `list --state review` (also `running` and English labels) maps to internal states and returns English `estado`
+  labels. Portuguese filters remain accepted; database/socket states are unchanged. CLI list consumers must adapt.
 - Queued task timeouts retry once with the saved session and “finish and report”, sharing the existing restart retry
   budget. Default timeout is 3600 seconds; `FALLBACK_TASK_TIMEOUT` is accepted as a legacy environment alias.
 
 ### Documentation
 
+- English/pt-BR cost and balancing guides and delegation-to-publication examples; five skill scenarios for partial
+  results, publication conflicts, For Claude requests and each engine's limit.
 - Quickstart now clones the repository first, so `rules/`, `examples/` and `templates/` exist for the copy steps;
   installs from the clone (`pip install .`, `pip install '.[whatsapp]'`).
 - The root daemon is documented as required to run tasks (the service refreshes repository mirrors through it and

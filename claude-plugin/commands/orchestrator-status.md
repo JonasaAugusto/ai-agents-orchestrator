@@ -3,8 +3,7 @@ description: Show the orchestrator status, the board and any pending note from C
 allowed-tools: Bash(aao status:*), Bash(aao list:*), Bash(aao note:*), Bash(aao briefing-status:*)
 ---
 
-Run `aao status --brief`, `aao list` and `aao note`, then summarize in a few lines: both usage windows and ratio,
-what Codex is doing now, tasks in review
-waiting for you, blocked tasks (with the reason), whether the queue is paused, Codex login/limit state and the age of
-the living briefing. Translate internal states for the user: pendente=pending, em_andamento=in progress,
-em_revisao=in review, concluida=completed, bloqueada=blocked, cancelada=cancelled. Suggest the next action.
+Run `aao status --brief`; summarize the queue, pause state and scheduled resets. Use `aao list --state review`
+only when review details are needed; its states are already translated. Open full `aao status`, `aao note` or
+`aao briefing-status` only to answer a specific question about activity, limits or briefing age.
+Prefer the next `aao hook-prompt` note over `aao wait` or repeated status checks. Suggest the next action in a few lines.

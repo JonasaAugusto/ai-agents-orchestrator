@@ -22,6 +22,10 @@ from .db import Estado, Quadro
 from .servico import Servico, publicar_base, aprovacao_publicacao
 
 FINAIS = ("em_revisao", "concluida", "bloqueada", "cancelada")
+ESTADOS_CLI = {"pendente": "pending", "em_andamento": "in progress", "em_revisao": "in review",
+               "concluida": "completed", "bloqueada": "blocked", "cancelada": "cancelled"}
+FILTROS_ESTADO = {label: state for state, label in ESTADOS_CLI.items()}
+FILTROS_ESTADO.update(running="em_andamento", review="em_revisao")
 AVISO_SEM_CANAL = ("Without a chat channel you cannot send prompts to Codex from your phone, receive its notifications, "
                    "or approve publishing with a button. Telegram is the channel that enables this "
                    "(WhatsApp is available as an unofficial, at-your-own-risk alternative).")
@@ -481,7 +485,8 @@ def main(argv=None) -> int:
         req.update(repo=a.repo, titulo=a.titulo, descricao=a.descricao, briefing=briefing,
                    arquivos=[x for x in a.arquivos.split(",") if x], prioridade=a.prioridade)
     elif cmd == "list":
-        req.update(estados=[a.estado] if a.estado else None, dono=a.dono)
+        estado = FILTROS_ESTADO.get(a.estado, a.estado)
+        req.update(estados=[estado] if estado else None, dono=a.dono)
     elif cmd in ("show", "result", "cancel"):
         req["id"] = a.id
         if cmd in ("show", "result"):
@@ -491,6 +496,9 @@ def main(argv=None) -> int:
     elif cmd == "claim":
         req.update(id=a.id, dono=a.dono, arquivos=[x for x in a.arquivos.split(",") if x])
     r = chamar(cfg, req)
+    if cmd == "list" and r.get("ok"):
+        r = {**r, "tarefas": [{**t, "estado": ESTADOS_CLI.get(t["estado"], t["estado"])}
+                              for t in r.get("tarefas", [])]}
     if cmd == "status" and a.brief and r.get("ok"):
         from datetime import datetime
         agenda = r.get("retomada_agendada") or {}

@@ -47,9 +47,10 @@ class Plugin(unittest.TestCase):
         texto = (PLUGIN / "skills" / "orchestrator-workflow" / "SKILL.md").read_text()
         fm = frontmatter(texto)
         self.assertEqual(fm["name"], "orchestrator-workflow")
-        self.assertGreater(len(fm["description"]), 200)
+        self.assertLess(len(fm["description"]), 200)
+        self.assertTrue(fm["description"])
         corpo = texto.lower()
-        for trecho in ("$(cat", "backticks", "do not poll", "fails without the change", "full suite",
+        for trecho in ("--briefing", "backticks", "do not poll", "fails without the change", "full suite",
                        "partial", "blocked", "human", "40 lines", "secrets", "serialize", "open codex", "abre o codex"):
             with self.subTest(trecho=trecho):
                 self.assertIn(trecho, corpo)
