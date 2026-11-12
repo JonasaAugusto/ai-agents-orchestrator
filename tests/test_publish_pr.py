@@ -82,6 +82,13 @@ class PrLite(test_lite.LiteWorkflow):
         self.assertIn("app.py", texto)
         self.assertIn(sha, texto)
 
+    def test_commit_with_phone_like_digits_is_kept_verbatim(self):
+        from ai_agents_orchestrator import config, servico
+        sha = "67943642484eb144bfb6968c8f0a2b4d159c711c"  # digit run that the phone masks would eat
+        _titulo, corpo = servico.texto_pr(config.Config(), {"id": 1, "origem": "codex"},
+                                          {"commit": sha, "destino": "main", "branch": "agent/1-x"}, ["app.py"])
+        self.assertIn(sha, corpo)
+
     def test_chat_task_title_is_generic(self):
         tid, ws, branch, sha = self.ready()
         self.quadro.atualizar(tid, origem="chat", titulo="what the owner typed")
