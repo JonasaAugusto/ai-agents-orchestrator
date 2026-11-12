@@ -165,8 +165,6 @@ class CleanEnvironment(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "unexpected doctor result"):
                     check_doctor("aao", Path("/tmp"), {}, configured=False)
 
-    @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
-    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_offline_example_delivers_patch_without_publishing(self):
         from examples.offline_relay import run_demo
         with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):

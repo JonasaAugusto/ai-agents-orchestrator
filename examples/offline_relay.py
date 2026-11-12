@@ -15,8 +15,18 @@ from ai_agents_orchestrator.engines import Resultado
 
 
 def git_environment() -> dict[str, str]:
-    return {"PATH": os.defpath, "HOME": "/nonexistent", "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_CONFIG_SYSTEM": os.devnull, "GIT_TERMINAL_PROMPT": "0"}
+    """A minimal, reproducible Git environment that also works on Windows.
+
+    PATH is inherited (the real git must be found); Windows additionally needs SYSTEMROOT/TEMP.
+    """
+    env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "SystemRoot", "TEMP", "TMP", "TMPDIR")
+           if key in os.environ}
+    env.update({"HOME": tempfile.gettempdir(), "USERPROFILE": tempfile.gettempdir(),
+                "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+                "GIT_TERMINAL_PROMPT": "0", "GIT_AUTHOR_NAME": "Example", "GIT_AUTHOR_EMAIL": "demo@example.com",
+                "GIT_COMMITTER_NAME": "Example", "GIT_COMMITTER_EMAIL": "demo@example.com",
+                "GIT_AUTHOR_DATE": "2001-09-09T01:46:40+0000", "GIT_COMMITTER_DATE": "2001-09-09T01:46:40+0000"})
+    return env
 
 
 def git(*args: str, cwd: Path) -> str:
@@ -28,13 +38,11 @@ def create_source(root: Path) -> Path:
     source = root / "source"
     source.mkdir()
     git("init", "-q", "-b", "main", cwd=source)
-    # A fixed synthetic commit, imported only into this disposable repository.
-    stream = ("blob\nmark :1\ndata 11\nvalue = 1\n\n"
-              "commit refs/heads/main\ncommitter Example <demo@example.com> 1000000000 +0000\n"
-              "data 7\nInitial\nM 100644 :1 demo.py\n\ndone\n")
-    subprocess.run(["git", "fast-import", "--quiet"], cwd=source, input=stream,
-                   env=git_environment(), check=True, capture_output=True, text=True)
-    git("reset", "--hard", "HEAD", cwd=source)
+    # A fixed synthetic commit made with plain `git add`/`git commit`: no fast-import, no shell, no newline
+    # translation (bytes are written as-is, so the blob is identical on every OS).
+    (source / "demo.py").write_bytes(b"value = 1\n")
+    git("-c", "core.autocrlf=false", "add", "demo.py", cwd=source)
+    git("-c", "commit.gpgsign=false", "commit", "-q", "--no-verify", "-m", "Initial", cwd=source)
     return source
 
 
