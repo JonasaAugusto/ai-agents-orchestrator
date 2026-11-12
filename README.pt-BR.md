@@ -440,6 +440,11 @@ O limite do Claude e do Codex deve acabar porque o trabalho saiu, não por despe
   precedência: `--effort` da tarefa > estado em tempo de execução (`/effort`) > `codex.default_effort` > padrão do Codex.
   Uma tarefa do Codex por vez (`service.max_concurrent_codex = 1`), salvo se você optar por
   paralelo. Testes focados durante o trabalho, suíte completa uma vez no fim.
+  Com `max_concurrent_codex = N` (N > 1) os slots extras só iniciam uma tarefa de desenvolvimento
+  independente de tudo que está rodando: nenhum repositório em comum (repositório citado no texto da tarefa
+  conta como tocado) e, no mesmo repositório, arquivos declarados sem sobreposição (tarefa sem `--files`
+  vale como o repositório inteiro). Cada tarefa tem seu workspace e seu runner; a junção na base continua
+  serial. Revisões e conversas nunca rodam em paralelo.
 - Claude: prefira subagentes novos com briefing curto (objetivo, arquivos, critérios de pronto) a fazer fork de uma
   conversa grande; cada fork relê todo o contexto e custa mais por tarefa.
 - Paralelismo é permitido, no máximo 2 ao mesmo tempo, em arquivos que não se tocam, um worktree por agente e um único

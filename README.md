@@ -528,6 +528,11 @@ The limits of Claude and Codex should run out because work shipped, not because 
   `aao delegate --effort`. The default comes from `codex.default_effort` (validated against the model's levels);
   precedence: task `--effort` > runtime state (`/effort`) > `codex.default_effort` > Codex's own default.
   One Codex task at a time (`service.max_concurrent_codex = 1`) unless you opt into parallel.
+  With `max_concurrent_codex = N` (N > 1) extra Codex slots start a pending dev task only when it is
+  independent of everything running: no shared repository (a repository named in the task text counts as
+  touched) and, inside the same repository, declared files that do not overlap (a task without `--files`
+  counts as the whole repository). Each task keeps its own workspace and runner; merges into the base
+  stay serial. Reviews and chat tasks never run in parallel.
   Focused tests while working, the full suite once at the end.
 - Claude: prefer new subagents with a short briefing (objective, files, done criteria) over forking a large
   conversation; every fork rereads all context and costs more per task.

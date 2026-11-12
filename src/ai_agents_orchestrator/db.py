@@ -288,17 +288,22 @@ class Quadro:
                 saida.append({"id": t["id"], "titulo": t["titulo"], "dono": t["dono"], "colisao": c[:5]})
         return saida
 
-    def proxima_para_codex(self, repos_ok: set[str] | None = None) -> dict | None:
-        """First pending Codex task whose dependencies are done and with no conflicting lock."""
+    def proxima_para_codex(self, repos_ok: set[str] | None = None, aceita=None, kinds: tuple[str, ...] | None = None) -> dict | None:
+        """First pending Codex task whose dependencies are done and with no conflicting lock. `aceita` is an extra
+        filter (parallel runs: independence from the tasks already running); `kinds` limits the task kinds."""
         with self._lock:
             rs = self.c.execute("SELECT * FROM tarefas WHERE estado='pendente' AND dono='codex' ORDER BY prioridade DESC, id").fetchall()
         for r in rs:
             t = self._d(r)
             if repos_ok is not None and t["repo"] and t["repo"] not in repos_ok:
                 continue
+            if kinds is not None and t["kind"] not in kinds:
+                continue
             if any((self.ver(d) or {}).get("estado") not in ("concluida", "em_revisao") for d in t["depende"]):
                 continue
             if t["kind"] == "dev" and t["repo"] and self.conflitos(t["id"], t["repo"], t["arquivos"]):
+                continue
+            if aceita is not None and not aceita(t):
                 continue
             return t
         return None

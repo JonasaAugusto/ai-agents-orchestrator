@@ -1,6 +1,7 @@
 """Main service: serial Codex queue, handoff on Claude usage limit, Claude<->Codex board, notes for Claude and local CLI."""
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -17,7 +18,7 @@ from pathlib import Path
 from . import compat, config, engines, garantias, medicao, prompts, sanitize, workspace
 from .botoes import Botoes
 from .config import Config
-from .db import Estado, Quadro
+from .db import Estado, Quadro, padroes_colidem
 from .historico import BOT, Historico
 from .canal import Canal, CanalErro as TelegramErro
 
@@ -111,6 +112,9 @@ def aprovacao_publicacao(cfg: Config, tarefa: dict) -> dict:
     return payload
 
 
+_JUNCAO = threading.Lock()  # merges and pushes into a base are serial, even with parallel Codex tasks
+
+
 def publicar_base(cfg: Config, quadro: Quadro, root, tid: int, agora: float, aprovacao: dict | None = None) -> dict:
     """Merge --no-ff of the branch into the base + push via the root daemon (same guards as the Publish button)."""
     t = quadro.ver(tid)
@@ -121,8 +125,9 @@ def publicar_base(cfg: Config, quadro: Quadro, root, tid: int, agora: float, apr
         if (aprovacao.get("tid") != tid or aprovacao.get("repo") != t["repo"] or
                 aprovacao.get("branch") != t["branch"] or not aprovacao.get("commit") or not aprovacao.get("destino")):
             return {"ok": False, "erro": "approval does not match the task"}
-        r = workspace.merge_e_push(cfg, t["repo"], Path(t["workspace"]), t["branch"], root=root,
-                                  commit=aprovacao["commit"], destino=aprovacao["destino"])
+        with _JUNCAO:
+            r = workspace.merge_e_push(cfg, t["repo"], Path(t["workspace"]), t["branch"], root=root,
+                                      commit=aprovacao["commit"], destino=aprovacao["destino"])
     except workspace.GitErro as e:
         return {"ok": False, "erro": str(e)}
     quadro.atualizar(tid, estado="concluida", publicado=json.dumps({"push": r["hash"], "quando": agora}))
@@ -238,6 +243,8 @@ class Servico:
         self._conversa_lock = threading.Lock()
         self._retomada_lock = threading.Lock()
         self._worker_lock = threading.Lock()
+        self._sched_lock = threading.Lock()  # picks and claims a task atomically (parallel Codex slots)
+        self._paralelas: dict[int, object] = {}  # extra Codex slots: task id -> its own runner
         self._claude_lock = threading.Lock()
         self._usage_lock = threading.Lock()
         self._socket_slots = threading.BoundedSemaphore(32)
@@ -919,7 +926,13 @@ class Servico:
         recentes = self.estado.execucoes_desde(agora - 3600, "tarefa")
         if len(recentes) >= self.balanceamento()["tasks_per_hour"]:
             return False
-        t = self.quadro.proxima_para_codex(set(self.cfg.repos))
+        if len(self._paralelas) >= max(1, self.cfg.max_codex_simultaneos):
+            return False
+        with self._sched_lock:
+            t = self.quadro.proxima_para_codex(set(self.cfg.repos), aceita=self._independente)
+            if t and t["kind"] == "dev":
+                self.tarefa_atual = t["id"]
+                self.quadro.atualizar(t["id"], estado="em_andamento", inicio=agora, erro=None)
         if not t:
             if self.estado.get("retomar"):
                 self.retomar_interrompidos()
@@ -935,9 +948,67 @@ class Servico:
         self.executar_tarefa(t)
         return True
 
-    def executar_tarefa(self, t: dict) -> None:
+    def _envolvidos(self, t: dict) -> set[str]:
+        return set(garantias.repos_envolvidos(self.cfg, t["repo"], t["titulo"], t.get("descricao") or "",
+                                              t.get("instrucoes") or "", " ".join(t.get("arquivos") or [])))
+
+    def _independente(self, t: dict) -> bool:
+        """True when `t` shares no repository and file with a task already running: the rule that allows parallel
+        Codex runs. Tasks without declared files count as touching their whole repository."""
+        if t["kind"] != "dev":
+            return True
+        env_t = self._envolvidos(t)
+        for a in self.quadro.ativas(ignorar=t["id"]):
+            comuns = env_t & self._envolvidos(a)
+            if not comuns:
+                continue
+            # declared files only describe a task's own repository: a repository merely mentioned is touched whole
+            if comuns != {t["repo"]} or t["repo"] != a["repo"] or padroes_colidem(t["arquivos"], a["arquivos"] or a["alterados"]):
+                return False
+        return True
+
+    def ciclo_extra(self) -> bool:
+        """One iteration of an extra Codex slot (`service.max_concurrent_codex` > 1). Runs a pending dev task only
+        when it is independent of everything running; each task has its own workspace and runner."""
+        limite = max(1, self.cfg.max_codex_simultaneos)
+        if limite <= 1 or self.estado.get("pausado", False) or self.parando:
+            return False
+        agora = self.agora()
+        if agora < self.codex_bloqueado_ate() or self.motor_efetivo() != "codex" or not self.codex.logado():
+            return False
+        if len(self.estado.execucoes_desde(agora - 3600, "tarefa")) >= self.balanceamento()["tasks_per_hour"]:
+            return False
+        with self._sched_lock:
+            if len(self._paralelas) + (1 if self._worker_lock.locked() else 0) >= limite:
+                return False
+            t = self.quadro.proxima_para_codex(set(self.cfg.repos), aceita=self._independente, kinds=("dev",))
+            if not t:
+                return False
+            runner = copy.copy(self.codex)
+            if hasattr(runner, "atual"):
+                runner.atual = None
+            self._paralelas[t["id"]] = runner
+            self.quadro.atualizar(t["id"], estado="em_andamento", inicio=agora, erro=None)
+        try:
+            self.executar_tarefa(t, runner, paralela=True)
+        finally:
+            self._paralelas.pop(t["id"], None)
+        return True
+
+    def run_worker_extra(self) -> None:
+        while not self.parar_ev.is_set():
+            try:
+                fez = self.ciclo_extra()
+            except Exception as e:  # never brings the service down
+                self.log(f"extra worker: {type(e).__name__}: {e}")
+                fez = False
+            self.parar_ev.wait(1 if fez else 5)
+
+    def executar_tarefa(self, t: dict, codex=None, paralela: bool = False) -> None:
         tid = t["id"]
-        self.tarefa_atual = tid
+        codex = codex or self.codex
+        if not paralela:
+            self.tarefa_atual = tid
         agora = self.agora()
         self.quadro.atualizar(tid, estado="em_andamento", inicio=agora, erro=None)
         if t.get("origem") != ORIGEM_HANDOFF:  # handoff: the only start notice is the short one from _aplicar_contexto
@@ -969,7 +1040,8 @@ class Servico:
             sufixo = ". Nothing was executed." if isinstance(e, garantias.SincronizacaoErro) else ""
             self.quadro.atualizar(tid, estado="bloqueada", erro=str(e)[:300], fim=self.agora())
             self.notificar_tarefa(t, f"#{tid} blocked: {e}{sufixo}")
-            self.tarefa_atual = None
+            if not paralela:
+                self.tarefa_atual = None
             return
 
         motor_prev = "claude" if self.motor_efetivo() == "claude" and t["kind"] == "dev" else "codex"
@@ -1018,18 +1090,19 @@ class Servico:
                     self.notificar_tarefa(t, "Claude hit its limit, using Codex.")
                 # Codex may not share Claude's context; select its own full/delta prompt.
                 prompt = prompt_para("codex")
-                res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, t.get("modelo") or self.estado.get("modelo"),
+                res = codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, t.get("modelo") or self.estado.get("modelo"),
                                           resume=t.get("thread_id"),
                                           esforco=t.get("esforco") or self.esforco_atual(), on_event=self.gravador_eventos(tid))
                 motor = "codex"
                 self.quadro.atualizar(tid, motor_execucao=motor)
         else:
-            res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, t.get("modelo") or self.estado.get("modelo"),
+            res = codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, t.get("modelo") or self.estado.get("modelo"),
                                       resume=t.get("thread_id"),
                                       esforco=t.get("esforco") or self.esforco_atual(), on_event=self.gravador_eventos(tid))
             motor = "codex"
         self.registrar_resultado("tarefa", motor, res, str(tid))
-        self.tarefa_atual = None
+        if not paralela:
+            self.tarefa_atual = None
         if self._interrompido(res) or res.timeout:
             atual = self.quadro.ver(tid)
             if atual["retomadas"] < 1:
@@ -1475,6 +1548,9 @@ class Servico:
         if t["estado"] == "pendente" and sessao and sessao.get("tid") == tid:
             self.estado.delete("retomar")
             self.estado.delete("chat_sessao")
+        if t["estado"] == "em_andamento" and tid in self._paralelas:
+            self._paralelas[tid].cancelar()
+            return {"ok": True, "obs": "cancelling the run in progress"}
         if t["estado"] == "em_andamento" and self.tarefa_atual == tid:
             self.codex.cancelar()
             if self.claude:
@@ -1559,7 +1635,7 @@ class Servico:
                 "retomada_agendada": self.agendamento(), "modelo": self.estado.get("modelo") or "Codex default",
                 "esforco": self.esforco_atual() or "Codex default",
                 "pausado": bool(self.estado.get("pausado", False)), "auto": self.auto(), "armado": self.armado(),
-                "tarefa_atual": self.tarefa_atual, "chat_em_execucao": self._conversa_lock.locked(), "fila": len(self.quadro.listar(("pendente",), "codex")),
+                "tarefa_atual": self.tarefa_atual, "tarefas_paralelas": sorted(self._paralelas), "chat_em_execucao": self._conversa_lock.locked(), "fila": len(self.quadro.listar(("pendente",), "codex")),
                 "claude": ("limited until " + hora_br(cl.get("reset_epoch"))) if cl.get("ativo") else "ok",
                 "canal": self.tg.nome if (self.tg is not None and not self.sem_telegram) else None,
                 "codex_logado": self.codex.logado(),
@@ -1738,7 +1814,7 @@ class Servico:
             self.quadro.mudou.notify_all()
 
     def ocupado(self) -> bool:
-        return bool(self.tarefa_atual) or self._conversa_lock.locked() or bool(getattr(self.codex, "atual", None)) \
+        return bool(self.tarefa_atual) or bool(self._paralelas) or self._conversa_lock.locked() or bool(getattr(self.codex, "atual", None)) \
             or bool(self.claude and getattr(self.claude, "atual", None))
 
     def drenar(self, limite: float = DRENAR_SEG, passo: float = 0.5) -> bool:
@@ -1776,6 +1852,8 @@ class Servico:
         with self.quadro.mudou:
             self.quadro.mudou.notify_all()
         self.codex.cancelar()
+        for r in list(self._paralelas.values()):
+            r.cancelar()
         if self.claude:
             self.claude.cancelar()
 
@@ -1791,7 +1869,8 @@ class Servico:
                 self.log(f"setMyCommands: {e}")
         # tasks "in progress" from a previous run go back to the queue
         self.recuperar_tarefas()
-        ths = [threading.Thread(target=self.run_worker, daemon=True), threading.Thread(target=self.run_socket, daemon=True),
+        ths = [threading.Thread(target=self.run_worker, daemon=True),
+               *[threading.Thread(target=self.run_worker_extra, daemon=True) for _ in range(max(1, self.cfg.max_codex_simultaneos) - 1)], threading.Thread(target=self.run_socket, daemon=True),
                threading.Thread(target=self.run_timer, daemon=True)]
         for t in ths:
             t.start()
