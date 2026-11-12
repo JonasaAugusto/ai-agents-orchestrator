@@ -57,6 +57,35 @@ flowchart LR
    living briefing against a masked tail of the transcript, proposes tasks, and (with `/auto` on) continues on its own
    branches. When the limit resets, Claude gets a note (and, optionally, a wake-up message) and takes the baton back.
 
+### Automatic resumption
+
+Usage limits keep tasks pending in SQLite. Codex resumes at `codex_limite.ate` using its saved thread and workspace.
+Claude's reset is read from the limit message; when no time is available, a headless probe runs every 15 minutes
+(`claude.probe_minutes`), if the service has a Claude login. The reset and next probe survive service/machine restarts.
+The optional interactive wake-up delivers a fixed notice; Claude reads the report in `HANDOFF-PARA-CLAUDE.md`.
+
+If both engines are limited, the channel receives “Both at their limits; I resume at …”. An independent internal timer
+checks the first reset, even while a worker is busy. Runnable tasks are selected by `--priority` (higher first), then
+oldest id, respecting dependencies, file locks, pause and hourly caps. Resumption says “continue where you stopped and
+report”. Thread/session ids are saved as soon as the engine announces them; runtime checkpoints and partial reports
+stay in `resultados/<id>/HANDOFF.md`, outside the repository, beside the live briefing references.
+
+Claude can run development tasks through `claude -p` while Codex is limited when **`claude.dev_fallback = true`**
+and the service has its own Claude login. This is off by default. The fallback balance allows at most 50% Claude
+attempts across persisted task runs (including limit failures); it never runs Codex cross-reviews or tasks assigned
+to an interactive Claude. If credentials, balance or locks prevent a run, the queue waits for Codex's reset.
+`service.orchestrator = "codex"` keeps pending handoff tasks with Codex when Claude returns, so coordination can
+continue without an interactive Claude session. This setting is independent of the task engine.
+
+A restart or timeout automatically retries a queued task **once**, sharing the retry budget, with the saved engine
+session and workspace. Timeout resumption says “finish and report”; another interruption blocks the task for review.
+The default task timeout is **3600 seconds**, configurable with `service.task_timeout`,
+`AAO_SERVICE_TASK_TIMEOUT`, or the legacy `FALLBACK_TASK_TIMEOUT` (the AAO variable wins).
+`aao status --brief` shows `retomada agendada: Claude HH:MM / Codex HH:MM` in the configured timezone (`-` means none);
+`aao doctor` validates the durable reset records. The timer needs no cron job. Publishing still requires human approval.
+Interrupted chat requests also wait for the reset and keep their session beyond the normal inactivity window;
+cancelling a queued chat request prevents automatic resumption.
+
 ## Features
 
 | Area | What you get |
@@ -293,13 +322,13 @@ Every command is `aao <command>` (also installed as `ai-agents-orchestrator`). P
 | `setup`, `doctor [--json]` | configure; check and get fix instructions |
 | `serve [--dry-run] [--no-chat]` | run the service |
 | `root-daemon` | run the optional privileged daemon |
-| `delegate --repo R --title T [--files a,b] [--briefing FILE \| --briefing-text TXT] [--description D]` | queue a task for Codex |
+| `delegate --repo R --title T [--files a,b] [--briefing FILE \| --briefing-text TXT] [--description D] [--priority N]` | queue a task for Codex |
 | `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID`, `cancel ID`, `claim ID [--owner] [--files]` | board |
 | `wait ID [--timeout S]` | block until a final state (exit 0 review/completed, 1 blocked/cancelled, 2 timeout) |
 | `review --repo R --branch B` | cross-review by Codex (read-only) |
 | `publish ID` | root only, interactive terminal: the owner types the task id to merge + push a reviewed task delegated by Claude |
 | `watch [ID] [--no-follow]`, `watch-open [ID]` | live view |
-| `status`, `pause`, `resume` | service state and queue |
+| `status [--brief]`, `pause`, `resume` | service state, durable resume schedule and queue |
 | `arm`, `disarm` | automatic handoff on Claude's usage limit |
 | `claude-limit`, `hook-prompt [--event E]`, `claude-resumed`, `note` | Claude Code hook glue and notes |
 | `briefing-status`, `briefing-check` | living briefing |
@@ -342,7 +371,9 @@ English; see the [glossary](#glossary).
 
 - Linux and systemd are assumed for the service, the sandbox and the examples; macOS is untested.
 - Codex's usage-limit message format is not documented; detection is tolerant but may miss new wording.
-- The handoff covers limits that reach the StopFailure hook; a limit hit with the session closed is noticed only by `/context`.
+- Initial interactive limit detection needs the StopFailure hook or `/context`; once recorded, reset scheduling and
+  queued development continue without an open Claude session. Unknown reset times require a headless Claude login
+  for probes; without it, Codex continues and Claude's availability awaits new evidence.
 - Secret masking is regex based; secrets in unusual formats can slip through.
 - The experimental Claude Code wake-up and the `/codex-pane` panel depend on undocumented or early-access interfaces.
 - The WhatsApp channel was tested with fakes only, not against a live WhatsApp account; pairing and reconnection

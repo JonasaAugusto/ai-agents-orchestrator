@@ -174,6 +174,11 @@ class Quadro:
             cols = {r["name"] for r in self.c.execute("PRAGMA table_info(tarefas)").fetchall()}
             if "origem" not in cols:
                 self.c.execute("ALTER TABLE tarefas ADD COLUMN origem TEXT NOT NULL DEFAULT 'claude'")
+            for nome, tipo in (("claude_thread_id", "TEXT"), ("motor_execucao", "TEXT"),
+                               ("retomada", "TEXT"), ("prioridade", "INTEGER NOT NULL DEFAULT 0"),
+                               ("retomadas", "INTEGER NOT NULL DEFAULT 0")):
+                if nome not in cols:
+                    self.c.execute(f"ALTER TABLE tarefas ADD COLUMN {nome} {tipo}")
             self.c.execute("UPDATE tarefas SET origem='claude' WHERE origem IS NULL OR origem=''")
         try:
             self.caminho.chmod(0o600)
@@ -192,16 +197,16 @@ class Quadro:
     def criar(self, titulo: str, descricao: str = "", repo: str = "", dono: str = "codex", origem: str = "dono",
               arquivos: list[str] | None = None, depende: list[int] | None = None, kind: str = "dev",
               alvo: str | None = None, estado: str = "pendente", instrucoes: str | None = None,
-              agora: float | None = None) -> dict:
+              agora: float | None = None, prioridade: int = 0) -> dict:
         assert dono in DONOS and estado in ESTADOS
         agora = agora if agora is not None else time.time()
         with self._lock:
             cur = self.c.execute(
-                "INSERT INTO tarefas(titulo,descricao,repo,dono,estado,origem,arquivos,depende,kind,alvo,instrucoes,visto_claude,criado,atualizado)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO tarefas(titulo,descricao,repo,dono,estado,origem,arquivos,depende,kind,alvo,instrucoes,visto_claude,criado,atualizado,prioridade)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (titulo.strip()[:200], descricao, repo, dono, estado, origem, json.dumps(arquivos or []),
                  json.dumps(depende or []), kind, alvo, instrucoes,
-                 0 if dono == "claude" and origem == "codex" else 1, agora, agora))
+                 0 if dono == "claude" and origem == "codex" else 1, agora, agora, int(prioridade)))
             return self.ver(cur.lastrowid)
 
     def ver(self, tid: int) -> dict | None:
@@ -258,7 +263,7 @@ class Quadro:
     def proxima_para_codex(self, repos_ok: set[str] | None = None) -> dict | None:
         """First pending Codex task whose dependencies are done and with no conflicting lock."""
         with self._lock:
-            rs = self.c.execute("SELECT * FROM tarefas WHERE estado='pendente' AND dono='codex' ORDER BY id").fetchall()
+            rs = self.c.execute("SELECT * FROM tarefas WHERE estado='pendente' AND dono='codex' ORDER BY prioridade DESC, id").fetchall()
         for r in rs:
             t = self._d(r)
             if repos_ok is not None and t["repo"] and t["repo"] not in repos_ok:

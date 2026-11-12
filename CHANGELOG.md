@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Persistent automatic usage-limit resumption, first-reset scheduling when both engines are limited, runtime
+  checkpoints with separate engine sessions, priority queueing and headless Claude development fallback (opt-in,
+  capped at half of persisted task attempts). Codex can keep coordination without an interactive Claude session.
+- `aao status --brief` displays reset times; `aao doctor` checks the persisted schedule. The independent timer and
+  periodic Claude availability probes recover after service/machine restarts, including interrupted context checks.
+
+### Changed
+
+- Queued task timeouts retry once with the saved session and “finish and report”, sharing the existing restart retry
+  budget. Default timeout is 3600 seconds; `FALLBACK_TASK_TIMEOUT` is accepted as a legacy environment alias.
+
 ### Documentation
 
 - Quickstart now clones the repository first, so `rules/`, `examples/` and `templates/` exist for the copy steps;

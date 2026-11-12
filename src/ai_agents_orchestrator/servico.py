@@ -116,6 +116,9 @@ class Servico:
         self.bot = None  # set by bot.Bot
         self._contexto_lock = threading.Lock()
         self._conversa_lock = threading.Lock()
+        self._retomada_lock = threading.Lock()
+        self._worker_lock = threading.Lock()
+        self._claude_lock = threading.Lock()
         self.ring: deque = deque(maxlen=300)
         self._snaps: dict[int, dict] = {}  # snapshot of each running task (goes to the summary/HANDOFF)
         self.hist = Historico(cfg.logs / "historico.jsonl", relogio)
@@ -289,7 +292,7 @@ class Servico:
 
     # ------------------------------------------------------------ conversation (free text)
     def conversar(self, texto: str, repo_citado: str | None = None, repo_padrao: str | None = None,
-                  retomada: bool = False) -> None:
+                  retomada: bool = False, tentativas: int | None = None) -> None:
         """Owner free text. With a known repo (mentioned, current session, /repo or the only allowed one) Codex runs in a
         clone with the write sandbox, on branch `agent/chat-<date>-<n>`; without a repo it answers read-only and asks which."""
         if self.parando:  # restart in progress: keep the request and resume it on start
@@ -297,15 +300,16 @@ class Servico:
             self.hist.gravar(BOT, "[restart] request kept to resume on start")
             return self.notificar("The service is restarting; I will resume your request as soon as it is back.")
         if retomada:
-            texto = ("(The service restarted and interrupted the previous run; resume where it stopped, without redoing what "
-                     "is already done.)\n" + texto)
+            texto = ("(Continue where you stopped and report. Finish and report after a timeout; preserve completed work.)\n" + texto)
         with self._conversa_lock:
             ate = self.codex_bloqueado_ate()
             if self.agora() < ate:
                 return self.notificar(f"Codex is at its usage limit (back at {hora_br(ate)}).")
             if not self.codex.logado():
                 return self.notificar(f"Codex is not logged in. Run `{CLI} doctor` for the login command.")
-            sessao = self.chat_sessao()
+            sessao = self.chat_sessao(preservar=retomada)
+            if sessao and retomada:
+                sessao["thread"] = (self.quadro.ver(sessao["tid"]) or {}).get("thread_id") or sessao.get("thread")
             if sessao and repo_citado and repo_citado != sessao["repo"]:
                 self.chat_encerrar()
                 sessao = None
@@ -333,14 +337,14 @@ class Servico:
             if pend and self.agora() - pend.get("quando", 0) < 1800 and pend.get("texto") != texto:
                 texto = f"(Previous owner request, without a repository: {pend['texto']})\n{texto}"
             self.estado.delete("chat_pendente")
-            self._chat_turno(sessao, texto, tentativas=1 if retomada else 0)
+            self._chat_turno(sessao, texto, tentativas=tentativas if tentativas is not None else (1 if retomada else 0))
 
     # --- chat session (one branch per session; /new or CHAT_INATIVO_SEG without messages ends it)
-    def chat_sessao(self) -> dict | None:
+    def chat_sessao(self, preservar: bool = False) -> dict | None:
         sessao = self.estado.get("chat_sessao")
         if not sessao:
             return None
-        if self.agora() - sessao.get("ultima", 0) > CHAT_INATIVO_SEG:
+        if self.agora() - sessao.get("ultima", 0) > CHAT_INATIVO_SEG and not (preservar or self.estado.get("retomar")):
             self.chat_encerrar()
             return None
         return sessao
@@ -398,6 +402,21 @@ class Servico:
         res = self.codex.executar(prompt, ws, "workspace-write", self.cfg.task_timeout, self.estado.get("modelo"),
                                   resume=sessao.get("thread"), esforco=self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
         self.estado.registrar_execucao("conversa", "codex", res.segundos, res.ok, str(tid), self.agora())
+        if res.thread_id:
+            sessao["thread"] = res.thread_id
+            self.quadro.atualizar(tid, thread_id=res.thread_id)
+            self.estado.set("chat_sessao", sessao)
+        if res.limite or (res.timeout and tentativas < 1):
+            if res.limite:
+                ate = res.limite.reset_epoch or int(self.agora() + 1800)
+                self.estado.set("codex_limite", {"desde": self.agora(), "ate": ate, "texto": res.limite.texto[:200]})
+                self.notificar(f"Codex hit its plan limit (back at {hora_br(ate)}); the request stays queued.")
+            motivo = "limite" if res.limite else "timeout"
+            self.estado.set("retomar", {"tipo": "chat", "texto": texto, "tentativas": tentativas,
+                                        "quando": self.agora(), "motivo": motivo})
+            self.quadro.atualizar(tid, estado="pendente", retomada=motivo)
+            self.checkpoint(tid, res)
+            return
         if self._interrompido(res):
             self.hist.gravar(BOT, "[interruption] a service restart interrupted Codex in chat; resuming on start", tid)
             if res.thread_id:
@@ -406,16 +425,16 @@ class Servico:
             self._chat_estado_tarefa(sessao)
             return  # the "retomar" marker stays; rodar() resumes on start
         self.estado.delete("retomar")
+        if res.timeout:
+            self.quadro.atualizar(tid, estado="bloqueada", erro="timeout after automatic resume")
+            self.checkpoint(tid, res)
+            return self.notificar("Codex timed out again; the request is blocked for review.")
         sessao.update(ultima=self.agora(), primeira=False)
         if res.thread_id:
             sessao["thread"] = res.thread_id
             self.quadro.atualizar(tid, thread_id=res.thread_id)
         self.estado.set("chat_sessao", sessao)
         try:
-            if res.limite:
-                ate = res.limite.reset_epoch or int(self.agora() + 1800)
-                self.estado.set("codex_limite", {"desde": self.agora(), "ate": ate, "texto": res.limite.texto[:200]})
-                return self.notificar(f"Codex hit its plan limit (back at {hora_br(ate)}).")
             if res.auth_erro:
                 return self.notificar(self.msg_relogin())
             if not res.ok:
@@ -510,7 +529,7 @@ class Servico:
     def eventos_path(self, tid: int) -> Path:
         return self.cfg.resultados / str(tid) / "events.jsonl"
 
-    def gravador_eventos(self, tid: int):
+    def gravador_eventos(self, tid: int, motor: str = "codex"):
         """Callback for CodexRunner: appends each Codex JSONL event, MASKED, to resultados/<tid>/events.jsonl so that
         `aao watch <id>` can follow it live and replay it later. Never raises (watching must not affect the task)."""
         caminho = self.eventos_path(tid)
@@ -518,6 +537,13 @@ class Servico:
 
         def gravar(ev: dict) -> None:
             try:
+                thread = ev.get("thread_id") if ev.get("type") == "thread.started" else None
+                if motor == "claude":
+                    thread = ev.get("session_id")
+                if thread:
+                    campo = "claude_thread_id" if motor == "claude" else "thread_id"
+                    self.quadro.atualizar(tid, **{campo: thread})
+                    self.checkpoint(tid)
                 linha = json.dumps({"t": round(self.agora(), 3), "ev": sanitize.mascarar_obj(ev)}, ensure_ascii=False)
                 with lock:
                     caminho.parent.mkdir(parents=True, exist_ok=True)
@@ -531,13 +557,29 @@ class Servico:
         return gravar
 
     # ------------------------------------------------------------ motor
+    def claude_limitado(self) -> bool:
+        cl = self.estado.get("claude_limite", {})
+        return bool(cl.get("ativo") and not cl.get("liberado"))
+
+    def claude_dev_permitido(self) -> bool:
+        # Conservative bridge to the balance policy: no more than half of all persisted dev attempts.
+        if not self.cfg.claude_dev_fallback or self.claude_limitado():
+            return False
+        if not self.claude or not self.claude.disponivel():
+            return False
+        runs = self.estado.execucoes_desde(0, "tarefa")
+        return sum(r["motor"] == "claude" for r in runs) < sum(r["motor"] == "codex" for r in runs)
+
     def motor_efetivo(self) -> str:
         m = self.estado.get("motor", "codex")
+        if self.claude_limitado():
+            return "codex"
+        if self.agora() < self.codex_bloqueado_ate() and self.claude_dev_permitido():
+            return "claude"
         if m == "claude":
             return "claude" if self.claude and self.claude.disponivel() else "codex"
         if m == "auto":
-            cl = self.estado.get("claude_limite", {})
-            if self.claude and self.claude.disponivel() and not cl.get("ativo"):
+            if self.claude and self.claude.disponivel():
                 return "claude"
         return "codex"
 
@@ -546,12 +588,126 @@ class Servico:
         d = self.estado.get("codex_limite", {})
         return float(d.get("ate", 0)) if d else 0.0
 
+    def checkpoint(self, tid: int, res: engines.Resultado | None = None) -> None:
+        """Runtime checkpoint outside the repository; never commit partial work on a limit."""
+        t = self.quadro.ver(tid)
+        if not t:
+            return
+        out = self.cfg.resultados / str(tid)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / "HANDOFF.md"
+        texto = (f"# Resume task #{tid}\n\nLive briefing: {self.briefing_path()}\n"
+                 f"Task briefing: {self.cfg.para_codex / 'tarefas' / (str(tid) + '.md')}\n"
+                 f"Workspace: {t['workspace']}\nBranch: {t['branch']}\n"
+                 f"Codex thread: {t['thread_id']}\nClaude session: {t['claude_thread_id']}\n"
+                 f"Resume reason: {t['retomada']}\n\nContinue where you stopped and report.\n")
+        if res:
+            texto += "\nLast partial report:\n" + (res.texto or res.erro or "(no report)")[-12000:]
+        elif path.exists():
+            anterior = path.read_text(encoding="utf-8")
+            if "\nLast partial report:\n" in anterior:
+                texto += "\nLast partial report:\n" + anterior.split("\nLast partial report:\n", 1)[1]
+        tmp = out / "HANDOFF.md.tmp"
+        tmp.write_text(sanitize.mascarar(texto, dev=True), encoding="utf-8")
+        tmp.replace(path)
+
+    def agendamento(self) -> dict:
+        cl = self.estado.get("claude_limite", {})
+        claude = None
+        if cl.get("ativo") and not cl.get("liberado"):
+            claude = cl.get("proxima_sonda") if cl.get("reset_estimado") else cl.get("reset_epoch")
+        codex = self.codex_bloqueado_ate()
+        codex = codex if codex > self.agora() else None
+        valores = [v for v in (claude, codex) if v is not None]
+        return {"claude": claude, "codex": codex, "proxima": min(valores) if valores else None}
+
+    def tick_retomada(self) -> bool:
+        """Idempotent timer driven by persisted limit epochs; independent of the long-running worker."""
+        if self.parando or not self._retomada_lock.acquire(blocking=False):
+            return False
+        try:
+            agora = self.agora()
+            cl = self.estado.get("claude_limite", {})
+            if cl.get("ativo") and not cl.get("liberado"):
+                alvo = cl.get("proxima_sonda", cl.get("reset_epoch", agora)) if cl.get("reset_estimado") else cl.get("reset_epoch", agora)
+                if agora >= alvo:
+                    liberado = not cl.get("reset_estimado")
+                    if cl.get("reset_estimado") and self.claude and self.claude.disponivel():
+                        if getattr(self.claude, "atual", None) or not self._claude_lock.acquire(blocking=False):
+                            return False
+                        try:
+                            res = self.claude.executar("Reply only: ok", self.cfg.state_dir, timeout=90, agora=agora)
+                        finally:
+                            self._claude_lock.release()
+                        liberado = res.ok
+                        if res.limite and res.limite.reset_epoch:
+                            cl.update(reset_epoch=res.limite.reset_epoch, reset_estimado=False)
+                    if liberado:
+                        cl.update(liberado=True, ativo=False)
+                    else:
+                        cl.update(proxima_sonda=agora + self.cfg.claude_sonda_minutos * 60)
+                    self.estado.set("claude_limite", cl)
+                    if liberado:
+                        self.gerar_recado()
+            # Keep the opt-in session wake-up and report even after availability is restored.
+            self.tick_volta()
+            if self.claude_limitado() and agora < self.codex_bloqueado_ate():
+                agenda = self.agendamento()
+                chave = [agenda["claude"], agenda["codex"]]
+                if self.estado.get("ambos_avisados") != chave:
+                    self.notificar(f"Both at their limits; I resume at {hora_br(agenda['proxima'])} "
+                                   "(ambos no limite, retomo no primeiro reset).")
+                    self.estado.set("ambos_avisados", chave)
+                    with self.quadro._lock:
+                        self.quadro.c.execute("UPDATE tarefas SET retomada='limite' WHERE estado='pendente' AND dono='codex' AND retomada IS NULL")
+            else:
+                self.estado.delete("ambos_avisados")
+            ctx = self.estado.get("contexto_retomar")
+            if (ctx and agora >= ctx.get("apos", 0) and agora >= self.codex_bloqueado_ate()
+                    and not self.estado.get("pausado", False) and self._worker_lock.acquire(blocking=False)):
+                try:
+                    r = self.claude_limite(ctx.get("payload"), retomada=True)
+                    if r.get("ok"):
+                        self.estado.delete("contexto_retomar")
+                finally:
+                    self._worker_lock.release()
+            return True
+        finally:
+            self._retomada_lock.release()
+
+    def recuperar_tarefas(self) -> None:
+        """Recover managed engine runs, never another interactive Claude session's locks."""
+        with self.quadro._lock:
+            ids = [r[0] for r in self.quadro.c.execute(
+                "SELECT id FROM tarefas WHERE estado='em_andamento' AND kind!='chat' "
+                "AND (dono='codex' OR motor_execucao IS NOT NULL)").fetchall()]
+        for tid in ids:
+            t = self.quadro.ver(tid)
+            if t["retomadas"] < 1:
+                self.quadro.atualizar(tid, estado="pendente", retomada=t["retomada"] or "reinicio", retomadas=1,
+                                      aviso="resumed after restart")
+            else:
+                self.quadro.atualizar(tid, estado="bloqueada", erro="interrupted again; automatic resume exhausted")
+            self.checkpoint(tid)
+            self.hist.gravar(BOT, f"[resume] task #{tid} recovered after restart", tid)
+
     def ciclo_worker(self) -> bool:
         """One worker iteration. True if something ran."""
+        if not self._worker_lock.acquire(blocking=False):
+            return False
+        try:
+            return self._ciclo_worker()
+        finally:
+            self.tarefa_atual = None
+            self._worker_lock.release()
+
+    def _ciclo_worker(self) -> bool:
         if self.estado.get("pausado", False) or self.parando:
             return False
+        self.tick_retomada()
         agora = self.agora()
-        if agora < self.codex_bloqueado_ate():
+        limitado = agora < self.codex_bloqueado_ate()
+        if limitado and not self.claude_dev_permitido():
             return False
         if not self.codex.logado() and self.motor_efetivo() == "codex":
             return False
@@ -560,6 +716,16 @@ class Servico:
             return False
         t = self.quadro.proxima_para_codex(set(self.cfg.repos))
         if not t:
+            if self.estado.get("retomar"):
+                self.retomar_interrompidos()
+                return True
+            return False
+        if t["kind"] == "chat":
+            if limitado:
+                return False
+            self.retomar_interrompidos()
+            return True
+        if limitado and t["kind"] != "dev":
             return False
         self.executar_tarefa(t)
         return True
@@ -571,7 +737,7 @@ class Servico:
         self.quadro.atualizar(tid, estado="em_andamento", inicio=agora, erro=None)
         if t.get("origem") != ORIGEM_HANDOFF:  # handoff: the only start notice is the short one from _aplicar_contexto
             self.notificar_tarefa(t, f"Starting #{tid}: {t['titulo']} ({t['repo'] or 'no repo'}).")
-        retomada = bool(t.get("workspace") and t.get("thread_id"))
+        retomada = bool(t.get("workspace"))
         sync, envolvidos = None, [t["repo"]] if t["repo"] else []
         try:
             if t["kind"] == "revisao":
@@ -613,19 +779,36 @@ class Servico:
         briefing_t = (self.cfg.state_dir / "para-codex" / "tarefas" / f"{tid}.md").exists()
         prompt = prompts.prompt_tarefa(self.quadro.ver(tid), branch=branch, base=base, briefing_tarefa=briefing_t,
                                        snapshot=snap["texto"])
-        if retomada and t.get("instrucoes"):
-            prompt = prompts._bloco(snap["texto"]) + t["instrucoes"]
+        if t.get("retomada"):
+            instrucao = "Finish and report (termine e relate)." if t["retomada"] == "timeout" else (
+                "Continue where you stopped and report (continue de onde parou e relate).")
+            prompt += (f"\n{instrucao}\nRead the live briefing and checkpoint: "
+                       f"{self.cfg.resultados / str(tid) / 'HANDOFF.md'}. Preserve existing changes.\n")
+        self.quadro.atualizar(tid, motor_execucao=motor_prev)
+        self.checkpoint(tid)
         if motor_prev == "claude":
-            res = self.claude.executar(prompt, ws, timeout=self.cfg.task_timeout, agora=self.agora())
+            with self._claude_lock:
+                res = self.claude.executar(prompt, ws, timeout=self.cfg.task_timeout, agora=self.agora(),
+                                          resume=t.get("claude_thread_id"), on_event=self.gravador_eventos(tid, "claude"))
             motor = "claude"
             if res.limite:
+                self.estado.registrar_execucao("tarefa", motor, res.segundos, res.ok, str(tid), self.agora())
                 self._registrar_claude_limite(res.limite, "claude -p")
+                if res.thread_id:
+                    self.quadro.atualizar(tid, claude_thread_id=res.thread_id)
+                self.checkpoint(tid, res)
+                if self.agora() < self.codex_bloqueado_ate():
+                    self.quadro.atualizar(tid, estado="pendente", retomada="limite")
+                    self._snaps.pop(tid, None)
+                    self.tick_retomada()
+                    return
                 if t.get("origem") != ORIGEM_HANDOFF:
                     self.notificar_tarefa(t, "Claude hit its limit, using Codex.")
                 res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, self.estado.get("modelo"),
                                           resume=t.get("thread_id") if retomada else None,
                                           esforco=self.estado.get("esforco"), on_event=self.gravador_eventos(tid))
                 motor = "codex"
+                self.quadro.atualizar(tid, motor_execucao=motor)
         else:
             res = self.codex.executar(prompt, ws, sandbox, self.cfg.task_timeout, self.estado.get("modelo"),
                                       resume=t.get("thread_id") if retomada else None,
@@ -633,15 +816,17 @@ class Servico:
             motor = "codex"
         self.estado.registrar_execucao("tarefa", motor, res.segundos, res.ok, str(tid), self.agora())
         self.tarefa_atual = None
-        if self._interrompido(res):
-            ja = self.estado.get("retomadas", {})
-            if ja.get(str(tid), 0) < 1:
-                ja[str(tid)] = ja.get(str(tid), 0) + 1
-                self.estado.set("retomadas", ja)
-                extra = {"thread_id": res.thread_id} if res.thread_id else {}
+        if self._interrompido(res) or res.timeout:
+            atual = self.quadro.ver(tid)
+            if atual["retomadas"] < 1:
+                campo = "claude_thread_id" if motor == "claude" else "thread_id"
+                extra = {campo: res.thread_id} if res.thread_id else {}
                 self._snaps.pop(tid, None)
-                self.quadro.atualizar(tid, estado="pendente", aviso="interrupted by a restart; will be resumed", **extra)
-                self.hist.gravar(BOT, f"[interruption] a service restart interrupted task #{tid}; back in the queue", tid)
+                self.quadro.atualizar(tid, estado="pendente", retomadas=1,
+                                      retomada="timeout" if res.timeout else "reinicio",
+                                      aviso="interrupted; will be resumed once", **extra)
+                self.checkpoint(tid, res)
+                self.hist.gravar(BOT, f"[interruption] task #{tid}; back in the queue once", tid)
                 return
             self.hist.gravar(BOT, f"[interruption] task #{tid} interrupted again; no further automatic resume", tid)
         self._pos_execucao(t, res, ws, branch, base, motor)
@@ -650,13 +835,17 @@ class Servico:
         tid = t["id"]
         snap = self._snaps.pop(tid, None) or {}
         if res.thread_id:
-            self.quadro.atualizar(tid, thread_id=res.thread_id)
+            campo = "claude_thread_id" if motor == "claude" else "thread_id"
+            self.quadro.atualizar(tid, **{campo: res.thread_id})
             self.estado.set("fallback_thread", {"tid": tid, "thread": res.thread_id, "ws": str(ws)})
+        self.checkpoint(tid, res)
         if res.limite:
             ate = res.limite.reset_epoch or int(self.agora() + self.cfg.claude_limite_padrao_min * 60)
             antes = self.estado.get("codex_limite", {})
             self.estado.set("codex_limite", {"desde": self.agora(), "ate": ate, "texto": res.limite.texto[:200]})
-            self.quadro.atualizar(tid, estado="pendente", aviso="Codex at its usage limit; will retry after the reset")
+            self.quadro.atualizar(tid, estado="pendente", retomada="limite", aviso="Codex at its usage limit; will retry after the reset")
+            self.checkpoint(tid, res)
+            self.tick_retomada()
             if not antes or antes.get("ate", 0) < self.agora():
                 self.notificar_tarefa(t, f"Codex also hit its plan limit (back around {hora_br(ate)}). "
                                f"Task #{tid} stays in the queue.")
@@ -682,9 +871,11 @@ class Servico:
             out = self.cfg.resultados / str(tid)
             out.mkdir(parents=True, exist_ok=True)
             (out / "resumo.txt").write_text(narrativa, encoding="utf-8")
-            self.quadro.atualizar(tid, estado="concluida", resumo=narrativa[:4000], fim=self.agora(), visto_claude=0)
+            estado = "concluida" if res.ok else "bloqueada"
+            self.quadro.atualizar(tid, estado=estado, resumo=narrativa[:4000], fim=self.agora(), visto_claude=0,
+                                  erro=None if res.ok else res.erro or ("timeout" if res.timeout else "engine failed"))
             self.notificar_tarefa(t, f"Review #{tid} ready ({t['alvo']}):\n{narrativa[:1500]}")
-            self.avisar_claude_fim(t, "concluida")
+            self.avisar_claude_fim(t, estado)
             self.gerar_recado()
             return
         # honest state: exit code 0 but a report declaring blocked/partial is NOT completion
@@ -755,30 +946,42 @@ class Servico:
     def _registrar_claude_limite(self, lim: engines.LimiteInfo, fonte: str) -> dict:
         reset = lim.reset_epoch or int(self.agora() + self.cfg.claude_limite_padrao_min * 60)
         d = {"ativo": True, "desde": self.agora(), "reset_epoch": reset, "tipo": lim.tipo, "evidencia": lim.texto[:300],
+             "reset_estimado": lim.reset_epoch is None, "proxima_sonda": self.agora() + self.cfg.claude_sonda_minutos * 60,
              "fonte": fonte, "acordadas": 0, "ultima_acordada": 0, "avisado_volta": False}
         self.estado.set("claude_limite", d)
         self.estado.set("claude_voltou", None)
         return d
 
-    def claude_limite(self, payload: dict | None = None, manual: bool = False) -> dict:
+    def claude_limite(self, payload: dict | None = None, manual: bool = False, retomada: bool = False) -> dict:
         """StopFailure(rate_limit) hook or /context: CODEX checks the briefing and decides. Serialized."""
         if not self.armado() and not manual:
             return {"ok": False, "motivo": f"not armed ({CLI} arm)"}
         if not self._contexto_lock.acquire(blocking=False):
             return {"ok": False, "motivo": "a check is already running"}
         try:
-            return self._claude_limite(payload, manual)
+            return self._claude_limite(payload, manual, retomada)
         finally:
             self._contexto_lock.release()
 
-    def _claude_limite(self, payload: dict | None, manual: bool) -> dict:
+    def _claude_limite(self, payload: dict | None, manual: bool, retomada: bool = False) -> dict:
         cl = self.estado.get("claude_limite", {})
-        if not manual and cl.get("ativo") and self.agora() < cl.get("reset_epoch", 0) + 3600:
+        if not manual and not retomada and cl.get("ativo") and self.agora() < cl.get("reset_epoch", 0) + 3600:
             return {"ok": True, "motivo": "same limit episode (already handled)"}
-        if not manual:  # repeated hooks (several Claude failures in a row): one check per window, no cost, no notice
+        if not manual and not retomada:  # repeated hooks: one check per window
             ult = self.estado.get("ultima_conferencia_hook", 0)
             if self.agora() - ult < DEBOUNCE_HOOK_SEG:
                 return {"ok": True, "motivo": "recent check (repeated hook ignored)"}
+        evidencia = (payload or {}).get("last_assistant_message", "")
+        lim = engines.detectar_limite_claude(evidencia, self.agora())
+        if lim and not cl.get("ativo") and not manual:
+            self._registrar_claude_limite(lim, "hook")
+        if lim or retomada:
+            self.estado.set("contexto_retomar", {"payload": sanitize.mascarar_obj(payload),
+                                                "apos": self.agora() + self.cfg.claude_sonda_minutos * 60})
+        if self.agora() < self.codex_bloqueado_ate():
+            if lim or retomada:
+                self.estado.set("contexto_retomar", {"payload": sanitize.mascarar_obj(payload), "apos": self.codex_bloqueado_ate()})
+            return {"ok": False, "motivo": "codex at its limit"}
         if not self.codex.logado():
             texto = ("Claude seems to have hit its limit, but Codex is not logged in. " + self.msg_relogin())
             if manual:
@@ -809,8 +1012,12 @@ class Servico:
         if res.limite:
             ate = res.limite.reset_epoch or int(self.agora() + 1800)
             self.estado.set("codex_limite", {"desde": self.agora(), "ate": ate, "texto": res.limite.texto[:200]})
+            if not manual:
+                if not self.estado.get("claude_limite", {}).get("ativo"):
+                    self._registrar_claude_limite(lim or engines.LimiteInfo("Claude rate-limit hook"), "hook")
+                self.estado.set("contexto_retomar", {"payload": sanitize.mascarar_obj(payload), "apos": ate})
             texto = (f"Claude hit its limit and Codex is at its limit too (back at {hora_br(ate)}). "
-                     "Nothing will run until then.")
+                     f"First scheduled recovery: {hora_br(self.agendamento()['proxima'])}.")
             if manual:
                 self.notificar(texto)
             else:
@@ -825,11 +1032,14 @@ class Servico:
             else:
                 self.aviso_uma_vez_por_dia("conferencia_falhou", texto)
             return {"ok": False, "motivo": erro or res.erro}
-        return self._aplicar_contexto(d, payload, manual, snap.get("avisos"))
+        resultado = self._aplicar_contexto(d, payload, manual, snap.get("avisos"))
+        self.estado.delete("contexto_retomar")
+        return resultado
 
     def _aplicar_contexto(self, d: dict, payload: dict | None, manual: bool, avisos_snapshot: list[str] | None = None) -> dict:
         evid = (payload or {}).get("last_assistant_message") or d["evidencia"]
         if d["limite"] == "nao" and not manual:
+            self.estado.set("claude_limite", {})
             self.notificar("Codex checked and saw no Claude usage limit (" + d["evidencia"][:200] + "). Nothing to do.")
             self.estado.set("ultimo_veredito", {"limite": "nao", "quando": self.agora(), "evidencia": d["evidencia"][:300]})
             return {"ok": True, "limite": "nao"}
@@ -885,13 +1095,18 @@ class Servico:
     def tick_volta(self) -> bool:
         """After the reset time, wake Claude (EXPERIMENTAL cross-session message, opt-in) and tell the owner. No transcript polling."""
         cl = self.estado.get("claude_limite", {})
-        if not cl.get("ativo") or not self.armado():
+        if not (cl.get("ativo") or cl.get("liberado")) or not self.armado():
+            return False
+        if cl.get("reset_estimado") and not cl.get("liberado"):
             return False
         agora = self.agora()
         if agora < cl["reset_epoch"] + 60 or cl["acordadas"] >= 3 or agora - cl["ultima_acordada"] < 1800:
             return False
         self.gerar_recado()
-        r = self.root.acordar_claude("volta") if self.cfg.claude_wakeup else {"ok": False, "erro": "wake-up disabled"}
+        try:
+            r = self.root.acordar_claude("volta") if self.cfg.claude_wakeup else {"ok": False, "erro": "wake-up disabled"}
+        except Exception as e:
+            r = {"ok": False, "erro": type(e).__name__}
         primeira = not cl.get("avisado_volta")
         cl.update(acordadas=cl["acordadas"] + 1, ultima_acordada=agora, avisado_volta=True, ultimo_acordar=r)
         self.estado.set("claude_limite", cl)
@@ -907,11 +1122,12 @@ class Servico:
         cl = self.estado.get("claude_limite", {})
         if cl:
             cl["ativo"] = False
+            cl["liberado"] = False
             self.estado.set("claude_limite", cl)
         self.estado.set("claude_voltou", self.agora())
         devolvidas = []
         for t in self.quadro.listar(("pendente", "bloqueada"), "codex"):
-            if t["origem"] == "handoff":
+            if t["origem"] == "handoff" and self.cfg.orchestrator != "codex":
                 self.quadro.atualizar(t["id"], dono="claude", aviso="handed back to Claude (it returned before I started)")
                 devolvidas.append(t["id"])
         n = self.quadro.marcar_visto()
@@ -994,11 +1210,11 @@ class Servico:
 
     # ------------------------------------------------------------ board / commands (CLI and bot)
     def delegar(self, repo: str, titulo: str, descricao: str = "", arquivos: list[str] | None = None, briefing: str | None = None,
-                dono: str = "codex", origem: str = "claude") -> dict:
+                dono: str = "codex", origem: str = "claude", prioridade: int = 0) -> dict:
         if repo not in self.cfg.repos:
             return {"ok": False, "erro": f"repo not allowed: {repo}"}
         conf = self.quadro.conflitos(None, repo, arquivos or [])
-        t = self.quadro.criar(titulo, descricao, repo, dono, origem, arquivos or [])
+        t = self.quadro.criar(titulo, descricao, repo, dono, origem, arquivos or [], prioridade=prioridade)
         if briefing:
             d = self.cfg.para_codex / "tarefas"
             d.mkdir(parents=True, exist_ok=True)
@@ -1021,6 +1237,10 @@ class Servico:
         t = self.quadro.ver(tid)
         if not t:
             return {"ok": False, "erro": "not found"}
+        sessao = self.estado.get("chat_sessao")
+        if t["estado"] == "pendente" and sessao and sessao.get("tid") == tid:
+            self.estado.delete("retomar")
+            self.estado.delete("chat_sessao")
         if t["estado"] == "em_andamento" and self.tarefa_atual == tid:
             self.codex.cancelar()
             if self.claude:
@@ -1034,7 +1254,7 @@ class Servico:
         c = req.get("cmd")
         if c == "delegar":
             return self.delegar(req.get("repo", ""), req.get("titulo", ""), req.get("descricao", ""), req.get("arquivos") or [],
-                                req.get("briefing"), origem="claude")
+                                req.get("briefing"), origem="claude", prioridade=int(req.get("prioridade", 0)))
         if c == "listar":
             ts = self.quadro.listar(tuple(req["estados"]) if req.get("estados") else None, req.get("dono"), int(req.get("limite", 30)))
             return {"ok": True, "tarefas": [self._resumo(t) for t in ts]}
@@ -1080,11 +1300,12 @@ class Servico:
 
     @staticmethod
     def _resumo(t: dict) -> dict:
-        return {k: t[k] for k in ("id", "titulo", "repo", "dono", "estado", "branch", "patch", "aviso", "kind", "origem")}
+        return {k: t[k] for k in ("id", "titulo", "repo", "dono", "estado", "branch", "patch", "aviso", "kind", "origem", "prioridade")}
 
     def status(self) -> dict:
         cl = self.estado.get("claude_limite", {})
-        return {"motor": self.estado.get("motor", "codex"), "modelo": self.estado.get("modelo") or "Codex default",
+        return {"motor": self.estado.get("motor", "codex"), "orchestrator": self.cfg.orchestrator,
+                "retomada_agendada": self.agendamento(), "modelo": self.estado.get("modelo") or "Codex default",
                 "esforco": self.estado.get("esforco") or "Codex default",
                 "pausado": bool(self.estado.get("pausado", False)), "auto": self.auto(), "armado": self.armado(),
                 "tarefa_atual": self.tarefa_atual, "chat_em_execucao": self._conversa_lock.locked(), "fila": len(self.quadro.listar(("pendente",), "codex")),
@@ -1101,11 +1322,18 @@ class Servico:
         while not self.parar_ev.is_set():
             try:
                 fez = self.ciclo_worker()
-                self.tick_volta()
             except Exception as e:  # never brings the service down
                 self.log(f"worker: {type(e).__name__}: {e}")
                 fez = False
             self.parar_ev.wait(1 if fez else 5)
+
+    def run_timer(self) -> None:
+        while not self.parar_ev.is_set():
+            try:
+                self.tick_retomada()
+            except Exception as e:
+                self.log(f"resume timer: {type(e).__name__}: {e}")
+            self.parar_ev.wait(1)
 
     def run_telegram(self) -> None:
         espera = 1
@@ -1187,13 +1415,19 @@ class Servico:
         r = self.estado.get("retomar")
         if not r:
             return
+        if (self.agora() < self.codex_bloqueado_ate() or self.estado.get("pausado", False)
+                or self.parando or not self.codex.logado()):
+            return
         self.estado.delete("retomar")
-        if r.get("tentativas", 0) >= 1 or self.agora() - r.get("quando", 0) > 3600:
+        limite = r.get("motivo") == "limite"
+        referencia = max(r.get("quando", 0), self.codex_bloqueado_ate())
+        if (not limite and r.get("tentativas", 0) >= 1) or self.agora() - referencia > 3600:
             self.hist.gravar(BOT, "[interruption] chat request not resumed (already resumed before, or too old)")
             return self.notificar("Codex was interrupted by a service restart more than once; please send the request again.")
         self.hist.gravar(BOT, "[resume] resuming the chat request interrupted by a restart")
         self.notificar("A restart interrupted Codex; resuming.")
-        self.conversar(r.get("texto", ""), retomada=True)
+        self.conversar(r.get("texto", ""), retomada=True,
+                       tentativas=r.get("tentativas", 0) if limite else 1)
 
     def parar(self, *_a) -> None:
         self.parando = True
@@ -1213,13 +1447,11 @@ class Servico:
             except TelegramErro as e:
                 self.log(f"setMyCommands: {e}")
         # tasks "in progress" from a previous run go back to the queue
-        for t in self.quadro.listar(("em_andamento",), "codex"):
-            self.quadro.atualizar(t["id"], estado="pendente", aviso="resumed after restart")
-            self.hist.gravar(BOT, f"[resume] task #{t['id']} went back to the queue after a restart", t["id"])
-        ths = [threading.Thread(target=self.run_worker, daemon=True), threading.Thread(target=self.run_socket, daemon=True)]
+        self.recuperar_tarefas()
+        ths = [threading.Thread(target=self.run_worker, daemon=True), threading.Thread(target=self.run_socket, daemon=True),
+               threading.Thread(target=self.run_timer, daemon=True)]
         for t in ths:
             t.start()
-        threading.Thread(target=self.retomar_interrompidos, daemon=True, name="retomar").start()
         self.log("Orchestrator started." + (" Queue paused." if self.estado.get("pausado") else "")
                  + ("" if not self.sem_telegram else " No chat channel: CLI/Claude Code only."))
         if self.sem_telegram:

@@ -293,7 +293,8 @@ def parser() -> argparse.ArgumentParser:
     e.add_argument("--no-repos", "--sem-repos", dest="sem_repos", action="store_true")
     _sub(sp, "claude-limit", "claude-limite", help="hook glue for StopFailure(rate_limit): forwards the payload")
     _sub(sp, "claude-resumed", "claude-assumiu", help="Claude is back: marks the baton and notes as read")
-    _sub(sp, "status", help="service status")
+    st = _sub(sp, "status", help="service status")
+    st.add_argument("--brief", action="store_true", help="short queue and resume schedule")
     _sub(sp, "pause", "pausar", help="pause the Codex queue")
     _sub(sp, "resume", "codex-retomar", help="resume the Codex queue")
     _sub(sp, "arm", "armar", help="enable automatic handoff on Claude's usage limit (sends context to OpenAI)")
@@ -314,6 +315,7 @@ def parser() -> argparse.ArgumentParser:
     dl.add_argument("--files", "--arquivos", dest="arquivos", default="", help="comma-separated paths/globs the task touches")
     dl.add_argument("--briefing", help="markdown file with the task briefing")
     dl.add_argument("--briefing-text", "--briefing-texto", dest="briefing_texto")
+    dl.add_argument("--priority", dest="prioridade", type=int, default=0, help="higher values run first (default 0)")
     dl.add_argument("--motor", default="codex", help=argparse.SUPPRESS)
     ls = _sub(sp, "list", "listar", help="list board tasks")
     ls.add_argument("--state", "--estado", dest="estado")
@@ -450,7 +452,7 @@ def main(argv=None) -> int:
         if a.briefing:
             briefing = Path(a.briefing).read_text(encoding="utf-8")
         req.update(repo=a.repo, titulo=a.titulo, descricao=a.descricao, briefing=briefing,
-                   arquivos=[x for x in a.arquivos.split(",") if x])
+                   arquivos=[x for x in a.arquivos.split(",") if x], prioridade=a.prioridade)
     elif cmd == "list":
         req.update(estados=[a.estado] if a.estado else None, dono=a.dono)
     elif cmd in ("show", "result", "cancel"):
@@ -460,6 +462,14 @@ def main(argv=None) -> int:
     elif cmd == "claim":
         req.update(id=a.id, dono=a.dono, arquivos=[x for x in a.arquivos.split(",") if x])
     r = chamar(cfg, req)
+    if cmd == "status" and a.brief and r.get("ok"):
+        from datetime import datetime
+        agenda = r.get("retomada_agendada") or {}
+        def hora(epoch):
+            return datetime.fromtimestamp(epoch, config.fuso()).strftime("%H:%M") if epoch else "-"
+        print(f"fila: {r.get('fila', 0)}; pausado: {r.get('pausado', False)}")
+        print(f"retomada agendada: Claude {hora(agenda.get('claude'))} / Codex {hora(agenda.get('codex'))}")
+        return 0
     if cmd == "note":
         print(r.get("texto", ""))
         return 0

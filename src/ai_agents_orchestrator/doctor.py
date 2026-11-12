@@ -6,8 +6,10 @@ printed: Codex login is checked only with the official `codex login status`, run
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
+import sqlite3
 import stat
 import subprocess
 from dataclasses import dataclass, field
@@ -227,10 +229,35 @@ def checar_base(cfg: Config, amb: Ambiente) -> list[Item]:
     return itens
 
 
+def checar_agendamento(cfg: Config) -> list[Item]:
+    """Read-only: the limit records themselves are the durable timer, no system cron required."""
+    if not cfg.db_estado.exists():
+        return [Item("resume schedule", INFO, "no state database yet")]
+    try:
+        with sqlite3.connect(cfg.db_estado.as_uri() + "?mode=ro", uri=True) as c:
+            rows = dict(c.execute("SELECT k,v FROM kv WHERE k IN ('claude_limite','codex_limite')"))
+        for key, raw in rows.items():
+            d = json.loads(raw)
+            if not isinstance(d, dict):
+                raise ValueError("invalid limit record")
+            campos = ("reset_epoch", "proxima_sonda") if key == "claude_limite" else ("ate",)
+            for campo in campos:
+                if campo in d and (isinstance(d[campo], bool) or not isinstance(d[campo], (int, float))
+                                   or not math.isfinite(d[campo]) or d[campo] <= 0):
+                    raise ValueError(f"invalid {key}.{campo}")
+            if (key == "codex_limite" and d and "ate" not in d) or (
+                    key == "claude_limite" and d.get("ativo") and "reset_epoch" not in d):
+                raise ValueError(f"missing reset in {key}")
+        return [Item("resume schedule", OK, "persisted SQLite resets; internal timer resumes after restart")]
+    except (sqlite3.Error, ValueError, TypeError) as e:
+        return [Item("resume schedule", FALHA, f"invalid persisted schedule ({type(e).__name__})",
+                     "Have the service operator inspect the limit records before resuming.")]
+
+
 def diagnosticar(cfg: Config, amb: Ambiente | None = None, settings: list[Path] | None = None) -> list[Item]:
     amb = amb or Ambiente()
     return (checar_base(cfg, amb) + checar_codex(cfg, amb) + checar_claude(cfg, amb, settings)
-            + checar_canal(cfg, amb) + checar_repos(cfg, amb))
+            + checar_canal(cfg, amb) + checar_repos(cfg, amb) + checar_agendamento(cfg))
 
 
 def main(cfg: Config, como_json: bool = False, amb: Ambiente | None = None, saida=print, settings=None) -> int:

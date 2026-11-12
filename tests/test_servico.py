@@ -130,6 +130,9 @@ class Fila(Base):
         t = self.quadro.criar("A", "", "web-app")
         self.codex.respostas = [Resultado(ok=False, timeout=True, erro="timeout", texto="parcial")]
         self.svc.ciclo_worker()
+        self.assertEqual(self.quadro.ver(t["id"])["estado"], "pendente")
+        self.codex.respostas = [Resultado(ok=False, timeout=True, erro="timeout", texto="parcial")]
+        self.svc.ciclo_worker()
         self.assertEqual(self.quadro.ver(t["id"])["estado"], "bloqueada")
         t2 = self.quadro.criar("B", "", "web-app")
         self.codex.respostas = [Resultado(ok=False, cancelado=True)]

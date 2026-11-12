@@ -48,6 +48,35 @@ flowchart LR
 5. **Passagem de bastão no limite**: quando o Claude Code atinge o limite, um hook chama `aao claude-limit`; o Codex
    confere o briefing vivo contra a cauda mascarada do transcript e continua nos próprios branches.
 
+## Retomada automática
+
+Limites mantêm as tarefas pendentes no SQLite. O Codex volta sozinho em `codex_limite.ate`, com o thread e workspace
+salvos. O horário do Claude vem da mensagem de limite; sem horário, uma sonda headless tenta a cada 15 minutos
+(`claude.probe_minutes`), se o serviço tiver login próprio do Claude. Horários e sondas sobrevivem ao reinício.
+O aviso proativo opcional envia um recado fixo; o relatório fica em `HANDOFF-PARA-CLAUDE.md`.
+
+Com ambos no limite, o canal avisa o horário da primeira tentativa de retomada. Um timer interno, separado do worker,
+acompanha o primeiro reset. A fila escolhe por `--priority` (maior primeiro), depois pelo id mais antigo, respeitando
+dependências, travas, pausa e teto por hora. A instrução é “continue de onde parou e relate”. Os identificadores de
+sessão são salvos assim que o motor os informa. Checkpoints e relatórios parciais ficam em
+`resultados/<id>/HANDOFF.md`, fora do repositório, com referências ao briefing vivo e ao briefing da tarefa.
+
+Para o Claude desenvolver via `claude -p` enquanto o Codex está limitado, habilite **`claude.dev_fallback = true`**
+e forneça login próprio do serviço; vem desligado. O equilíbrio permite no máximo 50% de tentativas do Claude no
+histórico persistido de tarefas, incluindo falhas por limite. Não executa revisões destinadas ao Codex nem tarefas de
+uma sessão interativa do Claude. Sem credenciais, cota de equilíbrio ou trava livre, espera o reset do Codex.
+`service.orchestrator = "codex"` mantém as tarefas de handoff com o Codex quando o Claude volta, permitindo coordenar
+sem sessão interativa aberta. Essa opção é independente do motor das tarefas.
+
+Reinício ou timeout retomam a tarefa da fila **uma vez**, compartilhando o mesmo orçamento de repetição e preservando
+sessão/workspace. Após timeout, a instrução é “termine e relate”; outra interrupção bloqueia para revisão. O teto
+padrão é **3600 segundos**, ajustável por `service.task_timeout`, `AAO_SERVICE_TASK_TIMEOUT` ou o legado
+`FALLBACK_TASK_TIMEOUT` (a variável AAO prevalece). `aao status --brief` mostra
+`retomada agendada: Claude HH:MM / Codex HH:MM` no fuso configurado (`-` significa sem agendamento);
+`aao doctor` valida os registros persistidos. Não precisa de cron. Publicação continua exigindo aprovação humana.
+Pedidos interrompidos no chat também aguardam o reset e preservam a sessão além do prazo normal de inatividade;
+cancelar um pedido pendente impede sua retomada automática.
+
 ## Modelo de segurança (padrões)
 
 Codex como usuário sem privilégio (`aao`), `workspace-write` **sem rede**; `danger-full-access` só com
