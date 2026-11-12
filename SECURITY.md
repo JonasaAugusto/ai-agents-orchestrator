@@ -11,6 +11,13 @@ user, a malicious repository) and what they gain. You will get an answer as soon
 
 Only the latest release receives security fixes.
 
+Use the private advisory link above for security reports, not the bug/feature templates. If GitHub reports that
+private reporting is unavailable, use GitHub's private [Report content](https://docs.github.com/en/site-policy/abuse-and-spam/reporting-abuse-or-spam)
+channel for platform abuse, or ask for a private maintainer contact without including vulnerability details.
+There is no guaranteed response deadline. CI secret scanning and fake-engine tests do not replace an independent
+security review or a live integration test. Linux/systemd is the operational target; macOS package CI does not
+validate Linux process hardening. See the README's version/support policy for experimental integrations.
+
 ## Threat model in short
 
 These privileged-service guarantees describe **full mode**. In **lite mode**, `aao serve`

@@ -354,7 +354,10 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", help="fake Codex/root daemon, no chat channel")
     s.add_argument("--no-chat", "--sem-telegram", dest="sem_canal", action="store_true", help="run without a chat channel")
     _sub(sp, "root-daemon", help="run the optional privileged daemon (root only)")
-    _sub(sp, "setup", help="interactive wizard: writes the config and the secrets env file")
+    setup = _sub(sp, "setup", help="interactive wizard, or an isolated non-interactive evaluation config")
+    setup.add_argument("--non-interactive", action="store_true", help="no prompts, no secrets, no publishing")
+    setup.add_argument("--output-dir", type=Path, help="explicit new/empty directory for non-interactive setup")
+    setup.add_argument("--repo-source", type=Path, help="local-only repository for non-interactive evaluation")
     d = _sub(sp, "doctor", help="check the installation and print fix instructions")
     d.add_argument("--json", action="store_true", help="machine-readable output")
     d.add_argument("--fix", action="store_true", help="create missing state directories and example rules; never restart services")
@@ -435,6 +438,12 @@ def main(argv=None) -> int:
         return verificar_regras(Path(a.file) if a.file else None)
     if cmd == "setup":
         from . import assistente
+        if a.non_interactive:
+            if a.output_dir is None:
+                parser().error("--output-dir is required with --non-interactive")
+            return assistente.nao_interativo(a.output_dir, a.repo_source)
+        if a.output_dir is not None or a.repo_source is not None:
+            parser().error("--output-dir and --repo-source require --non-interactive")
         return assistente.main()
     cfg = _cfg()
     if cmd == "doctor":

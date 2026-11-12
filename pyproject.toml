@@ -22,11 +22,14 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development",
 ]
 
 [project.optional-dependencies]
 whatsapp = ["neonize>=0.3"]
+dev = ["ruff==0.17.4", "mypy==2.4.1", "build==1.6.1", "twine==7.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/JonasaAugusto/ai-agents-orchestrator"
@@ -42,3 +45,31 @@ where = ["src"]
 
 [tool.setuptools.data-files]
 "share/ai-agents-orchestrator/rules" = ["rules/BASE_RULES.example.md", "rules/DIVISION.example.md"]
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+# Start with correctness checks; formatting the legacy code is a separate change.
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Existing unused imports only. New files receive the full checks above.
+"src/ai_agents_orchestrator/bot.py" = ["F401"]
+"src/ai_agents_orchestrator/doctor.py" = ["F401"]
+"src/ai_agents_orchestrator/testing.py" = ["F401"]
+"tests/helpers.py" = ["F401"]
+"tests/test_chat.py" = ["F401"]
+"tests/test_doctor_setup.py" = ["F401"]
+"tests/test_garantias.py" = ["F401"]
+"tests/test_historico.py" = ["F401"]
+"tests/test_origem.py" = ["F401"]
+"tests/test_seguranca.py" = ["F401", "F811"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/ai_agents_orchestrator/assistente.py", "scripts/clean_install_test.py", "examples/offline_relay.py"]
+follow_imports = "silent"
+ignore_missing_imports = true
+warn_unused_ignores = true

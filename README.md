@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/JonasaAugusto/ai-agents-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/JonasaAugusto/ai-agents-orchestrator/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/JonasaAugusto/ai-agents-orchestrator)](https://github.com/JonasaAugusto/ai-agents-orchestrator/releases)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
 [Português (Brasil)](README.pt-BR.md)
@@ -16,7 +17,7 @@ deployed without your explicit approval.
 - **No API keys.** It drives the official `codex` and `claude` CLIs with your own logins.
 - **You choose the permissions.** Codex starts restricted (own sandbox, no network, throwaway clones). On your own machine you can give it the same permissions as Claude ([Permission modes](#permission-modes)). Either way, publishing needs a human.
 - **Honest results.** A task whose report says `partial` or `blocked` is never shown as done, whatever the exit code.
-- **Python standard library only.** One optional extra (WhatsApp). Tested on Python 3.11 and 3.12.
+- **Python standard library only.** One runtime extra (WhatsApp); development tools are separate. CI targets Python 3.11–3.14 on Linux and macOS; the privileged service requires Linux/systemd.
 
 ## Contents
 
@@ -25,6 +26,71 @@ deployed without your explicit approval.
 [Claude Code plugin](#claude-code-plugin) · [Cost and balancing](#cost-and-balancing) · [Watching Codex live](#watching-codex-live) · [Chat channels](#chat-channels) ·
 [Telegram commands](#telegram-commands) · [CLI reference](#cli-reference) · [Configuration](#configuration) ·
 [FAQ](#faq) · [Limitations](#limitations) · [Roadmap](#roadmap) · [Glossary](#glossary)
+
+Start with [First 10 minutes](docs/first-10-minutes.md), including captured output from a credential-free run.
+See [honest comparison](#honest-comparison--comparação-honesta), [version and support policy](#version-and-support-policy),
+[contributing](CONTRIBUTING.md), [conduct](CODE_OF_CONDUCT.md) and [security reports](SECURITY.md).
+
+## Honest comparison / Comparação honesta
+
+These are different workflows, not a ranking. Descriptions below were checked against the linked project READMEs
+on **2026-11-12**; alternatives were not installed or benchmarked. "Prefer" is our interpretation of those documented
+workflows. Names are ambiguous: here Hydra means `Geraldlol/hydra`, and codex-router means `gitguffaw/codex-router`.
+
+| Alternative and source | What it does well, according to its docs | When to prefer it |
+| --- | --- | --- |
+| [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc#readme) | Codex reviews, background delegation, rescue and session transfer inside Claude Code. | You want OpenAI's direct Claude Code integration without adopting this project's service/root-daemon model. It already supports handoff; that is not unique to us. |
+| [kingbootoshi/codex-orchestrator](https://github.com/kingbootoshi/codex-orchestrator#readme) | Background Codex agents in tmux, parallel sessions, live attachment, steering and result capture. | Your priority is supervising several terminal workers; Bun and tmux fit your environment. |
+| [jarrodwatts/claude-delegator](https://github.com/jarrodwatts/claude-delegator#readme) | Specialist expert roles and routing via MCP. Its current README says the project is archived and its Codex integration no longer works with current Codex. | Study its specialist prompts or maintain an existing pinned legacy setup. For a new current-Codex install, its author recommends the OpenAI plugin above. |
+| [mustafaakben/agent-codex](https://github.com/mustafaakben/agent-codex#readme) | Delegation/review/research commands, agents, skills and opt-in project/MCP bootstrap templates. | You want a plugin-led workflow with configurable MCP integrations rather than a persistent relay service. |
+| [madd86/codex-bridge](https://github.com/madd86/codex-bridge#readme) | Context-rich prompts, tmux delegation and a supervised review loop. Its documented launch uses `--yolo`. | A small tmux bridge fits a trusted local environment and you accept its documented permission mode. |
+| [LegCLI](https://legcli.com/) | Monitors usage windows and switches models/agents through a configured ladder, carrying context in the same terminal. | Interactive continuity across several CLIs matters most; check its current commercial terms before adopting. |
+| [Hydra](https://github.com/Geraldlol/hydra#readme) | A durable VS Code collaboration room with shared transcripts, planning, build/verification/review phases and multiple agent heads. | You want an editor-centered shared room and its recorded decisions instead of a systemd-backed board. |
+| [codex-router](https://github.com/gitguffaw/codex-router#readme) | Policy-backed Codex delegation/reviews, model/effort controls and persistent jobs from Claude Code or Antigravity. | Routing and host integration are the main need; you do not need our remote control plane. |
+
+This project's focus is the **combination** of reserve execution with return to the coordinator, isolated task branches,
+publishing approval bound to the reviewed SHA and destination, a remote owner channel, and measured usage balancing.
+See [how it works](#how-it-works), [security](SECURITY.md) and [usage measurement](#usage-measurement-and-balance-110)
+for the implementation and limits. Usage balancing uses counters and configured quotas; it is not a dollar-cost
+optimizer and promises no savings. A root agent can bypass application approvals; same-UID isolation is limited.
+The extra service, root daemon and configuration are real adoption costs. For a review inside one editor session,
+start with a smaller integration if that meets your needs.
+
+## Version and support policy
+
+- Releases follow **SemVer**. Within 1.x, documented CLI commands/configuration and the task/report/approval contract
+  are the compatibility surface. Python internals, SQLite tables and local socket payloads are not a public API.
+  Security fixes can reject previously accepted unsafe operations; read the changelog before upgrading.
+- Only the **latest release** receives fixes, including security fixes; there is no LTS branch or response-time SLA.
+  A badge links to published releases; the checkout can include unreleased changes. This policy does not certify an
+  independent audit or production suitability for every environment.
+- Python **3.11–3.14** is the CI target on **Linux and macOS** for the package, tests and offline example.
+  The operational service/root daemon and example units target **Linux with systemd**; a macOS test pass does not
+  certify deployment there. Windows is not tested; WSL is not separately certified. External CLI compatibility also
+  depends on their installed versions; report those versions with bugs.
+- Delegation, review results, restricted defaults and owner-approved publishing are the supported core workflows.
+  `/codex-pane` and interactive Claude wake-up remain **experimental**, off by default, and can change without
+  compatibility guarantees. WhatsApp remains optional/unofficial with its documented risks. Usage balancing requires
+  calibration and treats unknown quotas as unknown.
+
+### Reproduce the installation check
+
+```bash
+sh scripts/clean-install-test.sh --empty
+```
+
+This creates a temporary venv, runs `pip install .` from a source copy, checks the installed import and `pip check`,
+runs `aao setup --non-interactive --output-dir ... --repo-source ...`, runs `aao doctor`, executes a disposable local
+task with fake Codex, and validates plugin manifests, skill frontmatter and hook CLI arguments. Network is needed
+only to obtain Python build tools. It never starts a real service or logs into an agent.
+Doctor **must fail** when required agents/daemons are absent: the test checks the exact expected failures and exit
+status, and rejects additional failures. Passing this check does not mean a live installation is ready.
+Unattended setup refuses directories owned by another user or writable by group/others and creates configuration
+exclusively, without replacing existing files.
+Plugin validation here is static; actually loading the plugin in an authenticated Claude Code session is a separate
+manual integration check. The plugin is installed from GitHub/the checkout; the Python wheel does not install it.
+CI also builds a wheel/sdist and exercises both with `--distribution`, and runs the source check in empty Python
+slim containers. See [CONTRIBUTING](CONTRIBUTING.md) for the scope of lint/type checks.
 
 ## How it works
 

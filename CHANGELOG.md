@@ -24,6 +24,12 @@ All notable changes to this project are documented here. The format follows
   privileged behavior remains available, with its separate root service and channel.
 
 ### Added
+- Linux/macOS × Python 3.11–3.14 CI, scoped Ruff/mypy checks, secret scanning, package builds and wheel/sdist install checks.
+- Fresh-venv installation check (`scripts/clean-install-test.sh`) and a runnable fake-engine relay example, using only
+  disposable state. Static plugin validation covers manifests, marketplace sources, skill metadata and hook arguments.
+- `aao setup --non-interactive --output-dir <new-or-empty-dir> [--repo-source <checkout>]`: isolated local evaluation
+  configuration, no prompts or credentials, no channel or publishing, restricted permissions; existing contents are refused.
+- Source-linked honest comparisons, release/support policy, captured first-ten-minutes walkthrough and conduct policy.
 - Codex permission modes documented and configurable: `restricted` (default) or full access, the same permissions as
   Claude. New key `codex.full_access_read_only` extends `codex.full_access` to read-only phases (reviews, research),
   and `aao setup` asks which mode to use and who orchestrates (`claude` or `codex`). `aao doctor` shows both.
