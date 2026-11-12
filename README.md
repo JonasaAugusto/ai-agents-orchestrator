@@ -17,7 +17,7 @@ deployed without your explicit approval.
 - **No API keys.** It drives the official `codex` and `claude` CLIs with your own logins.
 - **You choose the permissions.** Codex starts restricted (own sandbox, no network, throwaway clones). On your own machine you can give it the same permissions as Claude ([Permission modes](#permission-modes)). Either way, publishing needs a human.
 - **Honest results.** A task whose report says `partial` or `blocked` is never shown as done, whatever the exit code.
-- **Python with minimal dependencies.** Windows adds `tzdata` for IANA timezones; WhatsApp is an optional, unofficial extra (Telegram is the recommended channel). CI targets Python 3.11–3.14 on Linux, macOS and Windows; the privileged service requires Linux/systemd.
+- **Python with minimal dependencies.** Windows adds `tzdata` for IANA timezones; Telegram is the recommended chat channel. CI targets Python 3.11–3.14 on Linux, macOS and Windows; the privileged service requires Linux/systemd.
 
 ## Contents
 
@@ -163,7 +163,7 @@ How this differs from the alternatives is in the [honest comparison](docs/compar
 
 ```mermaid
 flowchart LR
-    U([You: terminal or phone]) -->|prompts, approvals| CH[Chat channel<br/>Telegram / WhatsApp / none]
+    U([You: terminal or phone]) -->|prompts, approvals| CH[Chat channel<br/>Telegram / none]
     U -->|works with| CC[Claude Code<br/>lead]
     CC -->|aao delegate / review| SVC
     CC -.->|StopFailure rate_limit hook| SVC
@@ -378,7 +378,7 @@ sudo aao setup
 ```
 
 It asks for the service user, state directory, timezone, Claude Code transcripts folder, **the chat channel**
-(Telegram / WhatsApp / none) and the repositories, then writes `/etc/ai-agents-orchestrator/config.toml` (0640 root:<service group>) and the
+(Telegram / none; WhatsApp is an unofficial extra) and the repositories, then writes `/etc/ai-agents-orchestrator/config.toml` (0640 root:<service group>) and the
 secrets file `/etc/ai-agents-orchestrator/env` plus `publish.key` (0600, root). For Telegram it tells you how to get
 the token (talk to **@BotFather**, `/newbot`) and **your numeric user id** (send any message to **@userinfobot**).
 
@@ -628,7 +628,7 @@ send with buttons, receive messages and button presses, allowed-user check), so 
 a repository is known), every state change asks for a button, buttons are HMAC-signed, expire after 10 minutes and
 work once per group. Only `telegram.chat_id`, in a private chat, is answered.
 
-**WhatsApp (unofficial, at your own risk).** A full replacement for Telegram: free-text prompts to Codex, task
+**WhatsApp (optional extra, unofficial, at your own risk).** Not part of the core: install it only if you accept the risk (`pip install 'ai-agents-orchestrator[whatsapp] @ git+https://github.com/JonasaAugusto/ai-agents-orchestrator'`); the library is imported lazily, so without it nothing else changes and `aao doctor` flags it. A full replacement for Telegram: free-text prompts to Codex, task
 notifications, approvals and commands. Buttons show an exact action code such as `a1b2c3d4:1`; bare numbers
 do not approve actions. Each new message invalidates older options, and a code is accepted only once.
 

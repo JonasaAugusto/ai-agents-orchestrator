@@ -246,6 +246,11 @@ def checar_canal(cfg: Config, amb: Ambiente) -> list[Item]:
         else:
             itens.append(Item("whatsapp session", OK, "paired, 0600"))
     else:
+        if amb.modulo("neonize"):
+            itens.append(Item("whatsapp extra", AVISO, "the optional unofficial WhatsApp library (neonize) is installed but "
+                              "service.channel is not whatsapp",
+                              "It is unused. WhatsApp support is unofficial and the number can be banned; "
+                              "remove it with `pip uninstall neonize` if you do not need it."))
         itens.append(Item("chat channel", INFO, "none (CLI + Claude Code only). " + AVISO_SEM_CANAL,
                           f"Optional: run `{CLI} setup` and choose Telegram."))
     return itens

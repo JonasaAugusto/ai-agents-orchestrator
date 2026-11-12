@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - `aao mcp`: minimal MCP server on stdio (standard library only) with `delegate` (including `model`/`effort`), `status`, `result` and `review`. It never publishes; publishing stays a human approval in the CLI. Registration: `claude mcp add aao -- aao mcp`.
 
+### Changed
+- WhatsApp is now clearly an optional, unofficial extra with ban risk: out of the first screen of both READMEs, `pip install '...[whatsapp]'`, the library is imported lazily, the wizard says it is an unofficial extra and checks the library, and `aao doctor` warns when the library is installed but unused. Existing WhatsApp setups keep working.
+
 ## [1.3.0] - 2026-11-12
 
 ### Added

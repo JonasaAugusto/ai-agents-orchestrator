@@ -106,6 +106,12 @@ class Doctor(unittest.TestCase):
         self.assertEqual(e["whatsapp opt-in"], doctor.FALHA)
         self.assertEqual(e["whatsapp library"], doctor.FALHA)
 
+    def test_whatsapp_instalado_mas_sem_uso_avisa(self):
+        self.cfg.channel = "none"
+        e = estados(doctor.checar_canal(self.cfg, AmbienteFalso(modulos={"neonize"})))
+        self.assertEqual(e["whatsapp extra"], doctor.AVISO)
+        self.assertNotIn("whatsapp extra", estados(doctor.checar_canal(self.cfg, AmbienteFalso())))
+
     def test_repos_inacessiveis_e_fora_da_allowlist(self):
         e = estados(doctor.checar_repos(self.cfg, AmbienteFalso(git_ok=False)))
         self.assertEqual(e["repo app"], doctor.FALHA)

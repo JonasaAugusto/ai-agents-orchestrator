@@ -16,7 +16,7 @@ publicado sem a sua aprovação explícita.
 - **Sem chaves de API.** Usa os CLIs oficiais `codex` e `claude` com os seus logins.
 - **Você escolhe as permissões.** O Codex começa restrito (sandbox próprio, sem rede, clones descartáveis). Na sua própria máquina, pode receber as mesmas permissões do Claude ([Modos de permissão](#modos-de-permissão)). Nos dois casos, publicar exige um humano.
 - **Resultado honesto.** Tarefa cujo relatório diz `partial` ou `blocked` nunca aparece como concluída.
-- **Python com dependências mínimas.** No Windows, `tzdata` fornece os fusos IANA; WhatsApp é um extra opcional e não oficial (o canal recomendado é o Telegram). A CI tem alvo Python 3.11–3.14 em Linux, macOS e Windows; o serviço privilegiado exige Linux/systemd.
+- **Python com dependências mínimas.** No Windows, `tzdata` fornece os fusos IANA; o canal de chat recomendado é o Telegram. A CI tem alvo Python 3.11–3.14 em Linux, macOS e Windows; o serviço privilegiado exige Linux/systemd.
 
 A documentação completa (tabelas de comandos, referência do CLI, configuração, FAQ) está no [README em inglês](README.md);
 este arquivo resume o essencial em português. Seções só em inglês: [Features](README.md#features), [Telegram commands](README.md#telegram-commands), [CLI reference](README.md#cli-reference), [Configuration](README.md#configuration), [FAQ](README.md#faq), [Roadmap](README.md#roadmap).
@@ -155,7 +155,7 @@ As diferenças para as alternativas estão na [comparação honesta](docs/compar
 
 ```mermaid
 flowchart LR
-    U([Você: terminal ou celular]) -->|pedidos, aprovações| CH[Canal de chat<br/>Telegram / WhatsApp / nenhum]
+    U([Você: terminal ou celular]) -->|pedidos, aprovações| CH[Canal de chat<br/>Telegram / nenhum]
     U -->|trabalha com| CC[Claude Code<br/>líder]
     CC -->|aao delegate / review| SVC
     CC -.->|hook StopFailure rate_limit| SVC
@@ -322,7 +322,7 @@ sudo useradd --system --home-dir /var/lib/ai-agents-orchestrator --create-home -
 sudo python3 -m venv /opt/ai-agents-orchestrator
 sudo /opt/ai-agents-orchestrator/bin/pip install .   # do clone; ainda não está no PyPI
 sudo ln -s /opt/ai-agents-orchestrator/bin/aao /usr/local/bin/aao
-sudo aao setup      # assistente: canal de chat (Telegram / WhatsApp / nenhum), repositórios, segredos em arquivo 0600
+sudo aao setup      # assistente: canal de chat (Telegram / nenhum; WhatsApp é extra não oficial), repositórios, segredos em arquivo 0600
 ```
 
 No Telegram: fale com o **@BotFather** (`/newbot`) para obter o token e mande qualquer mensagem ao **@userinfobot** para
@@ -512,7 +512,7 @@ Exemplo (ilustrativo):
 
 `service.channel = "telegram" | "whatsapp" | "none"`. A lógica do bot é independente do canal (interface em `canal.py`).
 
-**WhatsApp (não oficial, por sua conta e risco)**: substitui o Telegram por completo (pedidos ao Codex, avisos,
+**WhatsApp (extra opcional, não oficial, por sua conta e risco)**: fora do núcleo; instale só se aceitar o risco (`pip install 'ai-agents-orchestrator[whatsapp] @ git+https://github.com/JonasaAugusto/ai-agents-orchestrator'`). A biblioteca é carregada só quando necessária, então sem ela nada muda e o `aao doctor` avisa. substitui o Telegram por completo (pedidos ao Codex, avisos,
 aprovações por código específico da mensagem, como `a1b2c3d4:1`, comandos). Responder apenas `1` não aprova
 ações; cada mensagem nova invalida opções anteriores e cada código só pode ser usado uma vez.
 

@@ -170,7 +170,7 @@ class Assistente:
           "your own machine, with repositories you trust; publishing still needs your approval either way.")
         r["codex_full"] = self.pergunta("Codex permissions? restricted / full", "restricted",
                                         lambda v: v.lower() in ("restricted", "full")).lower() == "full"
-        canal = "none" if lite else self.pergunta("Which chat channel? telegram / whatsapp / none", "telegram",
+        canal = "none" if lite else self.pergunta("Which chat channel? telegram / none / whatsapp (unofficial extra, risk of number ban)", "telegram",
                                                    lambda v: v.lower() in ("telegram", "whatsapp", "none"))
         r["channel"] = canal.lower()
         env: dict[str, str] = {}
@@ -183,6 +183,8 @@ class Assistente:
             r["chat_id"] = self.pergunta("Your Telegram user id", valida=lambda v: v.isdigit())
         else:
             from .whatsapp import AVISO_RISCO
+            if not self.amb.modulo("neonize"):
+                s("\nWhatsApp is an optional extra and is not installed: pip install 'ai-agents-orchestrator[whatsapp] @ git+https://github.com/JonasaAugusto/ai-agents-orchestrator'")
             s("\n" + "!" * 78 + "\n" + AVISO_RISCO + "\n" + "!" * 78)
             if self.pergunta("Type I ACCEPT THE RISK to continue with WhatsApp (anything else switches to none)") != "I ACCEPT THE RISK":
                 r["channel"] = "none"
