@@ -61,6 +61,14 @@ def nome_pasta_projeto(caminho: str | os.PathLike) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(caminho))
 
 
+def _tem_jsonl(pasta: Path) -> bool:
+    """True when the folder holds transcripts; an unreadable or missing folder simply has none."""
+    try:
+        return pasta.is_dir() and any(pasta.glob("*.jsonl"))
+    except OSError:
+        return False
+
+
 def pasta_do_projeto(cfg) -> tuple[Path, str]:
     """Transcript folder of the project in use and where that choice came from.
 
@@ -71,26 +79,33 @@ def pasta_do_projeto(cfg) -> tuple[Path, str]:
     if explicito:
         # Either the encoded folder name already, or a project path (which gets encoded like Claude Code does).
         direto = raiz / explicito
-        if not re.search(r"[\\/:]", explicito) and direto.is_dir():
+        if not re.search(r"[\\/:]", explicito) and _tem_jsonl(direto):
             return direto, "lite.transcripts_project"
         return raiz / nome_pasta_projeto(explicito), "lite.transcripts_project"
     atual = raiz / nome_pasta_projeto(os.getcwd())
-    if atual.is_dir():
+    try:
+        if atual.is_dir():
+            return atual, "cwd"
+    except OSError:
         return atual, "cwd"
     # fonte_transcripts já aponta para a pasta de um projeto (jsonl direto, sem subpastas de projeto).
-    return (raiz, "transcripts dir") if any(raiz.glob("*.jsonl")) else (atual, "cwd")
+    return (raiz, "transcripts dir") if _tem_jsonl(raiz) else (atual, "cwd")
 
 
 def diagnostico_transcripts(cfg) -> tuple[str, str, str]:
     """(state, message, fix) for the lite transcript mirror; states use the doctor values "ok", "warn" and "FAIL"."""
     pasta, origem = pasta_do_projeto(cfg)
-    if pasta.is_dir() and any(pasta.glob("*.jsonl")):
+    if _tem_jsonl(pasta):
         return "ok", f"mirroring {pasta} (chosen by {origem})", ""
     chave = "[lite] transcripts_project = \"<full path of your project folder>\""
     if origem == "lite.transcripts_project":
         return ("FAIL", f"lite.transcripts_project = {cfg.transcripts_project!r} points to {pasta}, which has no "
                 "Claude Code transcripts", "Fix the value in config.toml, or open that project once in Claude Code.")
-    if not cfg.fonte_transcripts.is_dir():
+    try:
+        existe = cfg.fonte_transcripts.is_dir()
+    except OSError:
+        existe = False
+    if not existe:
         return ("warn", f"transcripts directory {cfg.fonte_transcripts} does not exist yet",
                 "Use Claude Code once, or set paths.claude_transcripts to the right directory.")
     return ("warn", f"no Claude Code transcripts for the folder where aao serve runs ({pasta})",

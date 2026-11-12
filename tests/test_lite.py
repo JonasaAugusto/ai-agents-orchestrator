@@ -192,6 +192,12 @@ class LiteTranscriptsProject(unittest.TestCase):
         self.assertEqual(estado, "warn")
         self.assertIn("transcripts_project", fix)
 
+    def test_unreadable_transcripts_directory_is_a_warning_not_a_crash(self):
+        with patch.object(Path, "is_dir", side_effect=PermissionError(13, "Permission denied")):
+            estado, msg, _fix = lite.diagnostico_transcripts(self.cfg)
+        self.assertEqual(estado, "warn")
+        self.assertIn("does not exist", msg)
+
     def test_doctor_reports_the_check_in_lite(self):
         self.cfg.transcripts_project = str(self.root / "typo")
         items = doctor.checar_base(self.cfg, AmbienteFalso())
