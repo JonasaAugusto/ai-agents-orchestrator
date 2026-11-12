@@ -28,6 +28,18 @@ DEBOUNCE_HOOK_SEG = 600  # repeated limit hooks inside this window are not re-ch
 CLI = config.CLI
 
 
+def peer_uid(connection) -> int:
+    """Linux SO_PEERCRED or the BSD/macOS getpeereid API; fail closed elsewhere."""
+    if hasattr(socket, "SO_PEERCRED"):
+        return struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    uid, gid = ctypes.c_uint(), ctypes.c_uint()
+    if libc.getpeereid(connection.fileno(), ctypes.byref(uid), ctypes.byref(gid)) != 0:
+        raise OSError("getpeereid failed")
+    return uid.value
+
+
 def _sem_tags(texto: str) -> str:
     import html as _h
     return _h.unescape(re.sub(r"</?[a-z]+>", "", texto))
@@ -137,6 +149,8 @@ class Servico:
         self._claude_lock = threading.Lock()
         self._usage_lock = threading.Lock()
         self._socket_slots = threading.BoundedSemaphore(32)
+        self.socket_ready = threading.Event()
+        self.socket_error: str | None = None
         self._recado_lock = threading.Lock()
         self.ring: deque = deque(maxlen=300)
         self._snaps: dict[int, dict] = {}  # snapshot of each running task (goes to the summary/HANDOFF)
@@ -219,6 +233,8 @@ class Servico:
 
     def msg_relogin(self) -> str:
         """How to log Codex in again, with the OFFICIAL command only (the service never reads auth files)."""
+        if self.cfg.mode == "lite":
+            return "Codex is not logged in. Run codex login --device-auth as your normal user; then aao doctor. Queue paused."
         return (f"Codex is not logged in (expired?). On the server run: sudo -u {self.cfg.service_user} "
                 f"env HOME={self.cfg.state_dir} CODEX_HOME={self.cfg.codex_home} codex login --device-auth "
                 f"(or `{CLI} doctor` for details).")
@@ -615,7 +631,8 @@ class Servico:
             if ultima is not None and 0 <= agora - ultima < self.cfg.balance_refresh_seconds:
                 return False
             self.estado.set("balance_ultima_consulta", agora)
-            u = engines.uso_codex(self.cfg.state_dir, self.cfg.codex_bin, timeout=3)
+            extra = {"child_env": engines.env_usuario()} if self.cfg.mode == "lite" else {}
+            u = engines.uso_codex(self.cfg.state_dir, self.cfg.codex_bin, timeout=3, **extra)
             if u.get("ok"):
                 self.estado.set("codex_uso_balance", {"quando": agora, "dados": u})
             self.alertar_balanceamento()
@@ -1485,7 +1502,7 @@ class Servico:
         try:
             with c:
                 c.settimeout(10)
-                uid = struct.unpack("3i", c.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[1]
+                uid = peer_uid(c)
                 if uid not in (0, os.getuid()):
                     return
                 dados = b""
@@ -1508,6 +1525,15 @@ class Servico:
             self._socket_slots.release()
 
     def run_socket(self) -> None:
+        try:
+            self._run_socket()
+        except (OSError, ValueError) as e:
+            self.socket_error = f"local socket: {type(e).__name__} (check paths.socket and directory permissions)"
+            self.parar_ev.set()
+        finally:
+            self.socket_ready.set()
+
+    def _run_socket(self) -> None:
         caminho = str(self.cfg.socket_path)
         Path(caminho).parent.mkdir(parents=True, exist_ok=True)
         tmp = caminho + ".tmp"
@@ -1517,8 +1543,9 @@ class Servico:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as srv:
             srv.bind(tmp)
             srv.listen(8)
-            os.chmod(tmp, 0o660)
+            os.chmod(tmp, 0o600 if self.cfg.mode == "lite" else 0o660)
             os.rename(tmp, caminho)
+            self.socket_ready.set()
             srv.settimeout(1)
             while not self.parar_ev.is_set():
                 try:
@@ -1595,6 +1622,9 @@ class Servico:
                threading.Thread(target=self.run_timer, daemon=True)]
         for t in ths:
             t.start()
+        if not self.socket_ready.wait(10) or self.socket_error:
+            self.parar()
+            raise OSError(self.socket_error or "local socket startup did not complete")
         self.log("Orchestrator started." + (" Queue paused." if self.estado.get("pausado") else "")
                  + ("" if not self.sem_telegram else " No chat channel: CLI/Claude Code only."))
         if self.sem_telegram:

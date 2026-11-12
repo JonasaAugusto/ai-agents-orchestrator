@@ -147,7 +147,8 @@ sem supervisão, mantenha os segredos fora do alcance e a lista de publicação 
 
 ## Modelo de segurança (padrões)
 
-Estes são os padrões do modo restrito; os [Modos de permissão](#modos-de-permissão) explicam como relaxá-los.
+Estes são os padrões do modo completo com permissões restritas do Codex; os [Modos de permissão](#modos-de-permissão)
+explicam como relaxá-los. Os limites do modo leve estão no [início rápido](#início-rápido-modo-leve-120).
 
 Codex como usuário sem privilégio (`aao`), `workspace-write` **sem rede**; `danger-full-access` só com
 `codex.full_access = true` (opt-in explícito, com aviso); publicar sempre exige humano; nada vai ao GitHub fora de
@@ -168,9 +169,72 @@ motor executa e revisa. Um humano aprova toda publicação nos dois casos.
 
 O que existe hoje: o comportamento de passagem acima, a escolha no `aao setup` e a linha no `aao doctor`. A skill do
 Claude Code que acompanha o projeto foi escrita para o Claude como coordenador; com `codex`, você conduz o trabalho
-pelo canal de chat (Telegram ou WhatsApp) e usa o Claude Code para as tarefas que enviar a ele.
+pelo CLI (leve) ou canal de chat (completo, Telegram ou WhatsApp) e usa o Claude Code para as tarefas que enviar a ele.
 
-## Início rápido
+## Início rápido: modo leve (1.2.0)
+
+No Linux ou macOS, com Python 3.11+, Git 2.38+, Codex CLI e Claude Code instalados,
+execute **no clone deste repositório**, como seu usuário normal:
+
+```bash
+pipx install . && aao setup
+# Alternativa:
+uv tool install . && aao setup
+```
+
+O pacote ainda não está no PyPI. O diretório de ferramentas do pipx ou uv precisa
+estar no PATH. Escolha **lite**, o coordenador (`claude` ou `codex`) e os repositórios
+GitHub ou clones locais. O setup detecta os dois CLIs, verifica login com
+`codex login status` e `claude auth status` e instala o plugin pelos comandos oficiais
+do marketplace do Claude. Nunca lê nem copia arquivos de credenciais. Informa como
+resolver CLI ou login ausente e falhas de instalação do plugin; depois, rode setup
+novamente. A segunda execução preserva configuração, regras e logins. Para mudar as
+escolhas, edite a configuração explicitamente.
+Selecione o diretório de transcrições do projeto Claude para limitar o contexto espelhado a esse projeto.
+
+```bash
+aao doctor
+aao serve
+# Deixe serve aberto; use outro terminal ou /delegate no Claude Code:
+aao delegate --help
+aao status --brief
+aao result 1
+aao review --repo meu-repo --branch agent/1-minha-tarefa
+```
+
+`aao serve` roda em um processo de usuário, com threads e subprocessos dos motores.
+Dispensa root e systemd, recusa root no modo leve e impede dois serviços no mesmo
+diretório de estado. Delegação, resultado, revisão cruzada, briefing, passagem após
+limite e `hook-prompt` usam a mesma fila do modo completo. Os dois coordenadores podem
+usar o CLI; não há canal remoto no modo leve. Ctrl+C encerra o serviço. Enquanto ele
+estiver fechado, nada executa; fila e agendamentos persistidos voltam na próxima partida.
+
+Após a revisão, **o humano** executa `aao publish <id>` em um terminal interativo.
+O comando mostra repositório, destino e SHA completo e exige digitar `<id> <SHA-completo>`.
+Pipes e a flag `--approved-by-owner` sozinha são recusados. Mudanças na branch ou no
+destino invalidam a aprovação. A publicação integra com a base atual do remoto e faz
+push sem force; conflitos e avanço concorrente do remoto impedem o envio. As branches
+dos agentes ficam locais até a aprovação. Repositórios somente locais entregam branch
+e patch para integração manual. O comando publica histórico Git, não faz deploy.
+
+O arquivo gerado contém `mode = "lite"` no topo. Padrões:
+`~/.config/ai-agents-orchestrator/config.toml` e
+`~/.local/state/ai-agents-orchestrator`, respeitando `XDG_CONFIG_HOME` e `XDG_STATE_HOME`.
+`AAO_CONFIG` seleciona outro arquivo; configurações de sistema existentes continuam
+compatíveis. O modo leve usa HOME, PATH e CODEX_HOME do usuário, incluindo Homebrew.
+O socket fica no diretório de estado; `paths.socket` permite encurtar caminhos longos.
+Usa `getpeereid` no macOS e `SO_PEERCRED` no Linux. O espelho atualiza sob demanda,
+sem depender de inotify.
+
+**O modo leve não isola os agentes da sua conta, arquivos ou credenciais Git.** Código
+sob o mesmo usuário pode alterar o estado ou simular aprovação. A confirmação é uma
+proteção do fluxo humano, não uma barreira contra código malicioso com o mesmo uid.
+Não há botão Publicar nem executor de deploy. O modo completo mantém o daemon
+privilegiado, estado protegido e canal remoto opcional. `aao doctor` explica o modo
+ativo e esses limites. Linux leve é testado localmente; a matriz de CI cobre Linux e
+macOS com Python 3.11/3.12. A CI de macOS precisa passar antes do lançamento.
+
+## Início rápido: modo completo
 
 ```bash
 git clone https://github.com/JonasaAugusto/ai-agents-orchestrator && cd ai-agents-orchestrator   # rules/, examples/ e templates/ usados abaixo
@@ -381,7 +445,8 @@ ids e estados; relatórios consultados são dados não confiáveis. Detalhes em 
 
 ## Limitações e roteiro
 
-Limitações: Linux/systemd; formato da mensagem de limite do Codex não é documentado; mascaramento por padrões; acordar
+Limitações: modo completo exige Linux/systemd; modo leve suporta Linux/macOS, com CI macOS obrigatória antes do lançamento;
+formato da mensagem de limite do Codex não é documentado; mascaramento por padrões; acordar
 o Claude e o painel dependem de interfaces não documentadas/em acesso antecipado; o canal WhatsApp foi testado só com
 dublês, não com uma conta real; um dono por instalação.
 

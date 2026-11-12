@@ -29,3 +29,25 @@ jobs:
           aao --version
           aao --help
           aao check-rules --file rules/BASE_RULES.example.md
+
+  lite:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install with pipx
+        run: |
+          python -m pip install pipx
+          python -m pipx install .
+          "$HOME/.local/bin/aao" --version
+      - name: Test lite runtime without root or systemd
+        run: |
+          python -m pip install .
+          python -m unittest tests.test_lite -v

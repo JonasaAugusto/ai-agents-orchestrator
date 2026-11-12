@@ -153,6 +153,8 @@ def hooks_instalados(amb: Ambiente, settings: list[Path] | None = None) -> set[s
 
 
 def comando_login(cfg: Config, device: bool = True) -> str:
+    if cfg.mode == "lite":
+        return f"{cfg.codex_bin} login{' --device-auth' if device else ''}"
     return (f"sudo -u {cfg.service_user} env HOME={cfg.state_dir} CODEX_HOME={cfg.codex_home} "
             f"codex login{' --device-auth' if device else ''}")
 
@@ -161,9 +163,9 @@ def checar_codex(cfg: Config, amb: Ambiente) -> list[Item]:
     if not amb.which(cfg.codex_bin):
         return [Item("codex CLI", FALHA, "not installed",
                      "Install the official Codex CLI (e.g. `npm install -g @openai/codex`), then run `aao doctor` again.")]
-    env = engines.env_filhos(cfg.state_dir)
+    env = engines.env_usuario() if cfg.mode == "lite" else engines.env_filhos(cfg.state_dir)
     cmd = [cfg.codex_bin, "login", "status"]
-    if amb.euid() == 0 and amb.usuario_existe(cfg.service_user):
+    if cfg.mode == "full" and amb.euid() == 0 and amb.usuario_existe(cfg.service_user):
         cmd = ["runuser", "-u", cfg.service_user, "--", *cmd]
     code, out = amb.rodar(cmd, env=env)
     from . import sanitize
@@ -258,7 +260,8 @@ def checar_repos(cfg: Config, amb: Ambiente) -> list[Item]:
             code, out = amb.rodar(["git", "-C", "/", *gitseguro.CONFIAVEL, "ls-remote", "--exit-code", f"https://github.com/{gh}.git", "HEAD"],
                                   env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/root"),
                                        "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_SYSTEM": "/dev/null",
-                                       "GIT_CONFIG_GLOBAL": "/root/.gitconfig" if amb.euid() == 0 else "/dev/null"}, timeout=60)
+                                       "GIT_CONFIG_GLOBAL": str(Path.home() / ".gitconfig") if cfg.mode == "lite" else
+                                       ("/root/.gitconfig" if amb.euid() == 0 else "/dev/null")}, timeout=60)
             if code == 0:
                 extra = "" if gh in cfg.push_allowlist else " (not in publish.push_allowlist: the agent cannot push it)"
                 itens.append(Item(f"repo {nome}", OK if not extra else AVISO, f"github {gh} reachable{extra}"))
@@ -282,7 +285,11 @@ def checar_base(cfg: Config, amb: Ambiente) -> list[Item]:
         itens.append(Item("config file", AVISO, f"{config.CONFIG_FILE} not found (defaults in use)", f"Run `{CLI} setup`."))
     else:
         itens.append(Item("config file", OK, str(config.CONFIG_FILE)))
-    if amb.usuario_existe(cfg.service_user):
+    if cfg.mode == "lite":
+        itens.append(Item("runtime mode", AVISO, "lite: current user, no systemd; no isolation from engines and no Publish button",
+                          "Review results, then use aao publish <id> at a terminal and confirm the full SHA."))
+    elif amb.usuario_existe(cfg.service_user):
+        itens.append(Item("runtime mode", INFO, "full: privileged root daemon and isolated service state; remote approval channel optional"))
         itens.append(Item("service user", OK, cfg.service_user))
     else:
         itens.append(Item("service user", FALHA, f"user '{cfg.service_user}' does not exist",
@@ -338,10 +345,15 @@ def diagnosticar(cfg: Config, amb: Ambiente | None = None, settings: list[Path] 
 
 def checar_runtime(cfg: Config, amb: Ambiente) -> list[Item]:
     itens = []
-    for nome, caminho in (("service socket", cfg.socket_path), ("root daemon socket", cfg.root_socket)):
+    sockets = [("service socket", cfg.socket_path)]
+    if cfg.mode == "full":
+        sockets.append(("root daemon socket", cfg.root_socket))
+    for nome, caminho in sockets:
         ativo = amb.socket_ativo(caminho)
+        fix = ("Run aao serve and check paths.socket." if cfg.mode == "lite" else
+               "Ask the operator to check aao serve / aao root-daemon and their configured sockets.")
         itens.append(Item(nome, OK if ativo else FALHA, "accepting connections" if ativo else "not accepting connections",
-                          "Ask the operator to check aao serve / aao root-daemon and their configured sockets." if not ativo else ""))
+                          fix if not ativo else ""))
     existe = amb.stat(cfg.para_codex / "BRIEFING.md") is not None
     itens.append(Item("live briefing", OK if existe else AVISO, "found" if existe else "BRIEFING.md missing",
                       "Ask Claude to write the live briefing; doctor --fix never invents context." if not existe else ""))
@@ -386,7 +398,7 @@ def corrigir_triviais(cfg: Config) -> list[Item]:
     itens = []
     import pwd
     try:
-        uid = pwd.getpwnam(cfg.service_user).pw_uid if os.geteuid() == 0 else None
+        uid = pwd.getpwnam(cfg.service_user).pw_uid if os.geteuid() == 0 and cfg.mode == "full" else None
     except KeyError:
         uid = None
 
@@ -405,7 +417,8 @@ def corrigir_triviais(cfg: Config) -> list[Item]:
                 os.chown(path, dono, -1)
 
     dirs = (cfg.state_dir, cfg.spool, cfg.workspaces, cfg.resultados, cfg.handoffs, cfg.para_claude,
-            cfg.para_codex, cfg.para_codex / "tarefas", cfg.logs, cfg.codex_home)
+            cfg.para_codex, cfg.para_codex / "tarefas", cfg.logs,
+            *((cfg.codex_home,) if cfg.mode == "full" else ()))
     for path in dirs:
         try:
             criar_diretorios(path, 0o700, uid)

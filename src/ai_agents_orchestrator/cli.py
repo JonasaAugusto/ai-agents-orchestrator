@@ -46,11 +46,15 @@ def chamar(cfg, req: dict, timeout: float | None = 30) -> dict:
                 dados += p
         return json.loads(dados.decode())
     except (OSError, ValueError):
-        return {"ok": False, "erro": f"service unavailable (systemctl status {config.NOME})"}
+        fix = "run aao serve" if cfg.mode == "lite" else f"systemctl status {config.NOME}"
+        return {"ok": False, "erro": f"service unavailable ({fix})"}
 
 
 def _cfg():
     env = dict(os.environ)
+    cfg = config.carregar(env)
+    if cfg.mode == "lite":
+        return cfg
     for k, v in config.ler_env_file().items():
         env.setdefault(k, v)
     return config.carregar(env)
@@ -91,9 +95,16 @@ def montar_servico(cfg, dry_run: bool, sem_telegram: bool, chave: str | None = N
         sem_telegram = True
     else:
         codex = engines.CodexRunner(cfg.state_dir, cfg.codex_bin, rede=cfg.codex_network, acesso_total=cfg.codex_full_access,
-                                    acesso_total_leitura=cfg.codex_full_access_read_only)
-        claude = engines.ClaudeRunner(cfg.state_dir, cfg.claude_bin)
-        root = root_daemon.RootClient(str(cfg.root_socket), chave_hex=chave)
+                                    acesso_total_leitura=cfg.codex_full_access_read_only,
+                                    child_env=engines.env_usuario() if cfg.mode == "lite" else None)
+        claude = engines.ClaudeRunner(cfg.state_dir, cfg.claude_bin,
+                                     child_env=engines.env_usuario() if cfg.mode == "lite" else None)
+        if cfg.mode == "lite":
+            from .lite import LocalBackend
+            root = LocalBackend(cfg)
+            sem_telegram = True
+        else:
+            root = root_daemon.RootClient(str(cfg.root_socket), chave_hex=chave)
         if cfg.codex_full_access:
             print("WARNING: codex.full_access = true -> Codex runs with danger-full-access (NO sandbox).", file=sys.stderr)
     canal = None if sem_telegram else criar_canal(cfg)
@@ -139,6 +150,10 @@ def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = 
     """Publishes (merge --no-ff into the base + push, via the root daemon) a task delegated by Claude. Root only, and
     only with the owner's confirmation typed in an interactive terminal (the task id). The `--approved-by-owner`
     flag is self-attested (an agent can pass it), so on its own it no longer publishes anything."""
+    if cfg.mode == "lite":
+        from .lite import lock
+        with lock(cfg.state_dir / "publish-cli.lock"):
+            return _publicar_lite(cfg, tid, root=root, interativo=interativo, entrada=entrada)
     if os.geteuid() != 0:
         print("refused: must run as root")
         return 2
@@ -191,6 +206,45 @@ def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = 
     except OSError:
         pass
     return _imprimir(r)
+
+
+def _publicar_lite(cfg, tid, *, root=None, interativo=None, entrada=input):
+    from .lite import LocalBackend
+    if interativo is None:
+        interativo = sys.stdin.isatty() and sys.stdout.isatty()
+    if not interativo:
+        print("refused: aao publish requires an interactive terminal and ID SHA confirmation")
+        return 2
+    quadro = Quadro(cfg.db_quadro)
+    try:
+        t = quadro.ver(tid)
+        if not t or t["estado"] != "em_revisao" or t.get("publicado"):
+            print("refused: task must be reviewed and not yet published")
+            return 2
+        approval = aprovacao_publicacao(cfg, t)
+        sha = approval.get("commit")
+        if not sha:
+            print("refused: task has no publishable commit")
+            return 2
+        try:
+            answer = entrada(f"Publish #{tid}, SHA {sha}, repo {approval['repo']}, base {approval['destino']}? "
+                             f"Type {tid} {sha}: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer != f"{tid} {sha}":
+            print("refused: confirmation must match the task ID and full SHA")
+            return 2
+        backend = root or LocalBackend(cfg)
+        backend.approved_cli = True
+        try:
+            return _imprimir(publicar_base(cfg, quadro, backend, tid, time.time(), approval))
+        finally:
+            backend.approved_cli = False
+    except workspace.GitErro as e:
+        print(str(e))
+        return 1
+    finally:
+        quadro.c.close()
 
 
 def instalar(origem: Path, destino: Path, exigir_root: bool = True) -> int:
@@ -361,8 +415,7 @@ def parser() -> argparse.ArgumentParser:
     rv.add_argument("--repo", required=True)
     rv.add_argument("--branch", required=True)
     rv.add_argument("--title", "--titulo", dest="titulo")
-    pb = _sub(sp, "publish", "publicar", help="merge + push a reviewed task delegated by Claude (root, owner types "
-                                               "the task id in an interactive terminal)")
+    pb = _sub(sp, "publish", "publicar", help="merge + push a reviewed task (interactive approval; lite: ID and full SHA)")
     pb.add_argument("id", type=int)
     pb.add_argument("--approved-by-owner", "--autorizado-pelo-dono", dest="autorizado", action="store_true",
                     help="deprecated, ignored: the owner must confirm interactively")
@@ -399,6 +452,9 @@ def main(argv=None) -> int:
             print(f"Opened the live Codex view ({como}): {linha}")
         return 0
     if cmd == "serve":
+        if cfg.mode == "lite":
+            from .lite import serve
+            return serve(cfg, a.dry_run)
         # the config (token) is already in memory; keep the HMAC key in memory, mark the process non-dumpable and
         # drop both secrets from the environment so same-uid engines cannot read /proc/<pid>/environ
         from . import seguranca
@@ -408,9 +464,16 @@ def main(argv=None) -> int:
         svc.rodar()
         return 0
     if cmd == "root-daemon":
+        if cfg.mode == "lite":
+            print("lite mode does not use a root daemon")
+            return 2
         root_daemon.servir(cfg)
         return 0
     if cmd == "mirror":
+        if cfg.mode == "lite":
+            from .lite import LocalBackend
+            backend = LocalBackend(cfg)
+            return _imprimir(backend._mirror() if a.sem_repos else backend.espelhar())
         return _imprimir(espelho.espelhar(cfg, com_repos=not a.sem_repos))
     if cmd == "claude-limit":  # minimal glue for the StopFailure hook: only forwards the payload
         payload = None

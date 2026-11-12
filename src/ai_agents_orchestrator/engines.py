@@ -150,6 +150,15 @@ def env_filhos(state_dir: Path, extras: dict[str, str] | None = None) -> dict[st
     return e
 
 
+def env_usuario() -> dict[str, str]:
+    """Lite engines use the caller's CLI installs and official login, never service secrets."""
+    e = env_filhos(Path.home())
+    for key in ("PATH", "HOME", "CODEX_HOME", "SSH_AUTH_SOCK", "TMPDIR"):
+        if os.environ.get(key):
+            e[key] = os.environ[key]
+    return e
+
+
 class _Proc:
     """Controls a subprocess with timeout, cancellation and clean termination of its process group."""
 
@@ -228,13 +237,13 @@ def sandbox_efetivo(sandbox: str, acesso_total: bool = False, incluir_somente_le
     return sandbox
 
 
-def status_login_codex(state_dir: Path, binario: str = "codex", runner=None) -> dict:
+def status_login_codex(state_dir: Path, binario: str = "codex", runner=None, child_env: dict | None = None) -> dict:
     """{"instalado": bool, "logado": bool, "detalhe": str}. Runs `codex login status` with the service HOME/CODEX_HOME.
     The output is masked and truncated; it is never expected to contain secrets."""
     from . import sanitize
     rodar = runner or (lambda cmd, env: subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env))
     try:
-        r = rodar([binario, "login", "status"], env_filhos(Path(state_dir)))
+        r = rodar([binario, "login", "status"], child_env if child_env is not None else env_filhos(Path(state_dir)))
     except FileNotFoundError:
         return {"instalado": False, "logado": False, "detalhe": "codex CLI not found in PATH"}
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -246,9 +255,10 @@ def status_login_codex(state_dir: Path, binario: str = "codex", runner=None) -> 
 
 class CodexRunner:
     def __init__(self, state_dir: Path, binario: str = "codex", runner=None, rede: bool = False,
-                 acesso_total: bool = False, acesso_total_leitura: bool = False):
+                 acesso_total: bool = False, acesso_total_leitura: bool = False, child_env: dict | None = None):
         self.state_dir = Path(state_dir)
         self.bin = binario
+        self.child_env = child_env if child_env is not None else env_filhos(self.state_dir)
         self.atual: _Proc | None = None
         self._runner = runner or _rodar  # injectable in tests
         self.rede = rede  # codex.network_access
@@ -262,7 +272,7 @@ class CodexRunner:
         cache = getattr(self, "_login_cache", None)
         if cache and agora - cache[0] < 60:
             return cache[1]
-        ok = status_login_codex(self.state_dir, self.bin)["logado"]
+        ok = status_login_codex(self.state_dir, self.bin, child_env=self.child_env)["logado"]
         self._login_cache = (agora, ok)
         return ok
 
@@ -321,7 +331,7 @@ class CodexRunner:
                     on_event(ev)
 
             try:
-                code, linhas, err, estourou = self._runner(cmd, prompt, str(cwd), env_filhos(self.state_dir), timeout, ctl, on_line)
+                code, linhas, err, estourou = self._runner(cmd, prompt, str(cwd), self.child_env, timeout, ctl, on_line)
             except FileNotFoundError:
                 res.erro = "codex not found"
                 return res
@@ -377,13 +387,21 @@ class CodexRunner:
 class ClaudeRunner:
     """Optional: headless `claude -p` as the service user, only if it has its own credentials."""
 
-    def __init__(self, state_dir: Path, binario: str = "claude", runner=None):
+    def __init__(self, state_dir: Path, binario: str = "claude", runner=None, child_env: dict | None = None):
         self.state_dir = Path(state_dir)
         self.bin = binario
+        self.child_env = child_env if child_env is not None else env_filhos(self.state_dir)
+        self.user_login = child_env is not None
         self._runner = runner or _rodar
         self.atual: _Proc | None = None
 
     def disponivel(self) -> bool:
+        if self.user_login:
+            try:
+                return subprocess.run([self.bin, "auth", "status"], env=self.child_env, capture_output=True,
+                                      text=True, timeout=30).returncode == 0
+            except (OSError, subprocess.TimeoutExpired):
+                return False
         return (self.state_dir / ".claude" / ".credentials.json").exists()
 
     def cancelar(self) -> None:
@@ -416,7 +434,7 @@ class ClaudeRunner:
                 on_event(ev)
 
         try:
-            code, linhas, err, estourou = self._runner(cmd, prompt, str(cwd), env_filhos(self.state_dir), timeout, ctl, on_line)
+            code, linhas, err, estourou = self._runner(cmd, prompt, str(cwd), self.child_env, timeout, ctl, on_line)
         except FileNotFoundError:
             res.erro = "claude not found"
             return res
@@ -449,7 +467,7 @@ class ClaudeRunner:
 
 
 # ------------------------------------------------------------------ /usage and /model
-def uso_codex(state_dir: Path, binario: str = "codex", timeout: float = 15.0) -> dict:
+def uso_codex(state_dir: Path, binario: str = "codex", timeout: float = 15.0, child_env: dict | None = None) -> dict:
     """Reads the plan limits via `codex app-server` (JSON-RPC over stdio: account/rateLimits/read).
     Undocumented-ish protocol; may change between Codex CLI versions."""
     msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -458,7 +476,7 @@ def uso_codex(state_dir: Path, binario: str = "codex", timeout: float = 15.0) ->
             {"jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read"}]
     try:
         p = subprocess.Popen([binario, "app-server", "--stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, env=env_filhos(state_dir), start_new_session=True)
+                             stderr=subprocess.DEVNULL, env=child_env if child_env is not None else env_filhos(state_dir), start_new_session=True)
     except OSError as e:
         return {"ok": False, "erro": type(e).__name__}
     seletor = selectors.DefaultSelector()

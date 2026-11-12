@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-12
+
+### Lite installation and runtime
+
+- Add top-level `mode = "lite"`, selected by setup, with a single foreground user
+  service, local backend and user/XDG paths. No root daemon, systemd, `/proc` or inotify
+  dependency in lite; Unix peer authentication supports Linux and macOS.
+- Preserve delegation, results, read-only cross-review, briefing, hooks and persistent
+  usage-limit scheduling. Local task branches are imported into mirrors for cross-review.
+- Interactive lite `aao publish <id>` binds confirmation to the full SHA and destination,
+  merges against the current remote base and pushes without force. The service backend
+  refuses base publication. No lite remote channel or deployment runner.
+- Idempotent guided setup detects both official CLIs, checks login without reading
+  credential files, installs the Claude plugin and preserves existing config/rules.
+  Document `pipx install . && aao setup` and `uv tool install . && aao setup` in EN/PT-BR.
+- Add Linux/macOS lite CI with Python 3.11/3.12; macOS CI is a release gate. Full-mode
+  privileged behavior remains available, with its separate root service and channel.
+
 ### Added
 - Codex permission modes documented and configurable: `restricted` (default) or full access, the same permissions as
   Claude. New key `codex.full_access_read_only` extends `codex.full_access` to read-only phases (reviews, research),

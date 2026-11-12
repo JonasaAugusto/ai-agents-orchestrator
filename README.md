@@ -21,7 +21,7 @@ deployed without your explicit approval.
 ## Contents
 
 [How it works](#how-it-works) · [Features](#features) · [Permission modes](#permission-modes) · [Security model](#security-model) · [Who orchestrates](#who-orchestrates) ·
-[Quickstart](#quickstart) · [Tutorial](#tutorial-your-first-task) · [Design decisions](#design-decisions) ·
+[Quickstart](#quickstart-lite-mode-120) · [Tutorial](#tutorial-your-first-task) · [Design decisions](#design-decisions) ·
 [Claude Code plugin](#claude-code-plugin) · [Cost and balancing](#cost-and-balancing) · [Watching Codex live](#watching-codex-live) · [Chat channels](#chat-channels) ·
 [Telegram commands](#telegram-commands) · [CLI reference](#cli-reference) · [Configuration](#configuration) ·
 [FAQ](#faq) · [Limitations](#limitations) · [Roadmap](#roadmap) · [Glossary](#glossary)
@@ -168,7 +168,8 @@ secrets out of reach, and keep the publish allowlist short.
 
 ## Security model
 
-These are the defaults of the restricted mode; [Permission modes](#permission-modes) explains how to relax them.
+These are full-mode defaults with restricted Codex permissions; [Permission modes](#permission-modes) explains
+how to relax them. Lite's different trust model is described in its [quickstart](#quickstart-lite-mode-120).
 
 | Default | Why |
 | --- | --- |
@@ -206,10 +207,74 @@ engine executes and reviews. A human approves every publication in both cases.
 | Balance policy, wake-ups, human approval | same | same |
 
 What is implemented today: the handoff behaviour above, the choice in `aao setup`, and the line in `aao doctor`. The
-bundled Claude Code skill is written for Claude as coordinator, so with `codex` you drive the work from the chat
-channel (Telegram or WhatsApp) and use Claude Code for the tasks you send it.
+bundled Claude Code skill is written for Claude as coordinator, so with `codex` you drive the work from the CLI
+(lite) or chat channel (full, Telegram or WhatsApp) and use Claude Code for the tasks you send it.
 
-## Quickstart
+## Quickstart: lite mode (1.2.0)
+
+On Linux or macOS, with Python 3.11+, Git 2.38+, Codex CLI and Claude Code installed,
+run this **from the cloned repository**, as your normal user:
+
+```bash
+pipx install . && aao setup
+# Alternative:
+uv tool install . && aao setup
+```
+
+The package is not on PyPI yet. Ensure pipx's or uv's tool bin directory is on PATH.
+Choose **lite** in the wizard, choose the coordinator (`claude` or `codex`), and register
+the GitHub repositories or local checkouts you want to use. Select the Claude project's
+transcript directory to keep mirrored context scoped to that project. Setup detects both CLIs,
+checks login using `codex login status` and `claude auth status`, and installs the
+Claude Code plugin using Claude's official marketplace commands. It never reads or
+copies credential files. Missing CLIs, logins or plugin installation failures are
+reported with next steps; after fixing them, rerun setup. Existing configuration,
+rules and logins are preserved; edit the config explicitly to change those choices.
+
+```bash
+aao doctor
+aao serve
+# Keep serve running; use another terminal or Claude Code's /delegate command:
+aao delegate --help
+aao status --brief
+aao result 1
+aao review --repo myrepo --branch agent/1-my-task
+```
+
+`aao serve` is one user process with worker threads and engine subprocesses. It needs
+neither root nor systemd, refuses to run as root in lite mode, and allows only one
+service per state directory. Delegation, results, cross-review, briefing, usage-limit
+handoff and `hook-prompt` use the same queue as full mode. Both coordinators can use
+the CLI; lite has no remote chat channel. Stop the foreground service with Ctrl+C.
+Nothing runs while it is stopped; persisted work and reset schedules resume at startup.
+
+After reviewing the task, **the human** runs `aao publish <id>` in an interactive
+terminal. The command shows the repository, destination and full branch SHA and
+requires typing `<id> <full-SHA>`. Pipes and `--approved-by-owner` alone are refused.
+Changing the branch or destination invalidates the approval. GitHub publishing merges
+against the current remote base and pushes without force; conflicts or concurrent
+remote updates fail safely. Agent branches remain local until approval; local-only
+repositories are delivered as workspace branches and patches for manual integration.
+This command publishes Git history, not a deployment.
+
+The generated config has top-level `mode = "lite"`. It defaults to
+`~/.config/ai-agents-orchestrator/config.toml` (`XDG_CONFIG_HOME` supported); state
+defaults to `~/.local/state/ai-agents-orchestrator` (`XDG_STATE_HOME` supported).
+`AAO_CONFIG` selects an explicit config; an existing system config remains supported.
+Lite uses your normal HOME, PATH and CODEX_HOME, including Homebrew/CLI install paths.
+The local socket lives in the state directory; `paths.socket` can shorten a long path.
+macOS uses peer credentials through `getpeereid`; Linux uses `SO_PEERCRED`. Mirrors
+are refreshed on demand; no inotify dependency is needed.
+
+**Lite does not isolate agents from your account, files or Git credentials.** A process
+under your uid can alter state or simulate approval. Interactive confirmation is a
+human workflow safeguard, not a security boundary against malicious same-user code.
+There is no Publish button or deployment runner. Full mode retains the privileged
+daemon, protected state and optional remote approval channel. `aao doctor` explains
+the active mode and these limits. Linux lite is tested locally; the CI matrix tests
+lite on Linux and macOS with Python 3.11 and 3.12. macOS CI must pass before release.
+
+## Quickstart: full mode
 
 Linux with systemd, Python 3.11+, git, the [Codex CLI](https://github.com/openai/codex) and
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed.
@@ -307,7 +372,8 @@ Try it without any account: `aao serve --dry-run` uses fake engines and no chat 
 5. **Wait for the note**: the hook delivers a short message when Codex finishes. Do not poll.
 6. **Review in layers** with `/review-task <id>`: Codex cross-reviews and proves the tests, you read
    `aao result <id> --short` and open only risky files (deletions, auth, migrations, money, security).
-7. **Publish** only after your approval: the button in your chat, or the root CLI where you type the task id.
+7. **Publish** only after your approval: lite's user CLI requires the task ID and full SHA; full mode uses
+   the chat button or root CLI confirmation.
    The approval is bound to the reviewed commit; a changed branch needs a new approval.
 
 A full command-by-command run is in the [end-to-end example](#end-to-end-example).
@@ -394,9 +460,9 @@ in review and returns translated `estado` labels: `pending`, `in progress`, `in 
 `cancelled`. Filters accept these labels, `running`/`review`, and legacy Portuguese state names; database/socket
 states remain unchanged. Scripts reading the CLI list must use the new labels.
 
-After complete reports, a clean cross-review and Claude's risk-file review, the **owner** presses [Publish]. For a
-Claude-delegated task the owner can instead run the following as root in their own interactive terminal and type
-`12` to confirm; the agent must never run it for them:
+After complete reports, a clean cross-review and Claude's risk-file review, the **owner** publishes.
+In lite, run the command below as your normal user and type `12 <full-SHA>` to confirm. In full mode, press
+[Publish] or run it as root for a Claude-delegated task and type `12`. The agent must never run it for you:
 
 ```bash
 aao publish 12
@@ -505,7 +571,7 @@ Every command is `aao <command>` (also installed as `ai-agents-orchestrator`). P
 | `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID [--short\|--full]`, `cancel ID`, `claim ID [--owner] [--files]` | board; `list` accepts `review`/`running` and returns English state labels; `result` defaults to short |
 | `wait ID [--timeout S]` | block until a final state (exit 0 review/completed, 1 blocked/cancelled, 2 timeout) |
 | `review --repo R --branch B` | cross-review by Codex (read-only) |
-| `publish ID` | root only, interactive terminal: the owner types the task id to merge + push a reviewed task delegated by Claude |
+| `publish ID` | interactive human approval; lite: normal user types ID and full SHA; full: root types ID for a Claude-delegated task |
 | `watch [ID] [--no-follow]`, `watch-open [ID]` | live view |
 | `status [--brief]`, `pause`, `resume` | service state, durable resume schedule and queue |
 | `arm`, `disarm` | automatic handoff on Claude's usage limit |
@@ -536,12 +602,12 @@ Check your plan's terms for automation and concurrency yourself; the WhatsApp ch
 **What does OpenAI receive?** The task prompts, the repositories Codex works on and, if you run `aao arm`, a masked tail
 of your Claude Code transcript and memory files. Masking is pattern based.
 
-**Can Codex push to main?** No. The service commits; only the root daemon pushes, only `agent/*` branches of
-allowlisted repos, and merges into the base branch need your signed approval.
+**Can Codex push to main?** The orchestrator requires human approval before merging an agent branch into the
+base of an allowlisted repo. Full mode uses the root daemon; lite uses the user's interactive publish command.
+Lite cannot enforce this against malicious code sharing your uid and Git credentials.
 
-**Do I need the root daemon?** Yes, to run tasks. The service refreshes the repository mirrors through it before
-each task and blocks the task if the daemon is unreachable. It is also the only component holding GitHub
-credentials, so it is the one that pushes and publishes.
+**Do I need the root daemon?** Only in full mode, where it refreshes mirrors and publishes with separate
+credentials. Lite performs on-demand synchronization and human-approved publishing as your normal user.
 
 **Why are some identifiers in Portuguese?** The project started as an internal tool in Brazil. User-facing text is
 English; see the [glossary](#glossary).
@@ -572,7 +638,7 @@ English; see the [glossary](#glossary).
 
 ## Limitations
 
-- Linux and systemd are assumed for the service, the sandbox and the examples; macOS is untested.
+- Full mode requires Linux/systemd. Lite supports Linux and macOS without systemd; see the CI release gate above.
 - Codex's usage-limit message format is not documented; detection is tolerant but may miss new wording.
 - Initial interactive limit detection needs the StopFailure hook or `/context`; once recorded, reset scheduling and
   queued development continue without an open Claude session. Unknown reset times require a headless Claude login

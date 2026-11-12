@@ -164,13 +164,14 @@ class Setup(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(config.definir_fuso, config.nome_fuso())
         self.d = Path(self.tmp.name)
 
     def rodar(self, respostas, parear=None):
-        it = iter(respostas)
+        it = iter(["full", *respostas])
         saida = []
         a = assistente.Assistente(entrada=lambda _p: next(it), saida=saida.append, config_file=self.d / "config.toml",
-                                  env_file=self.d / "env", parear=parear)
+                                  env_file=self.d / "env", parear=parear, amb=AmbienteFalso())
         self.assertEqual(a.executar(), 0)
         return "\n".join(saida)
 
@@ -228,6 +229,7 @@ class Setup(unittest.TestCase):
         self.assertIn("not affiliated with WhatsApp or Meta", out)
         self.assertEqual(tomllib.loads((self.d / "config.toml").read_text())["service"]["channel"], "none")
         pareados = []
+        (self.d / "config.toml").unlink()  # explicitly start a new configuration; reruns now preserve it
         self.rodar(["aao", str(self.d / "st"), "UTC", "", "claude", "restricted", "whatsapp", "I ACCEPT THE RISK", "15550100000", ""],
                    parear=pareados.append)
         cfg = tomllib.loads((self.d / "config.toml").read_text())

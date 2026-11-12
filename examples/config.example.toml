@@ -7,6 +7,8 @@
 #   AAO_PUBLISH_KEY=<64 hex chars, same value as publish.key; `aao setup` generates both>
 # The service user (and therefore Codex, which runs with the same uid) must not be able to read that file.
 
+mode = "full"  # legacy privileged install; use `aao setup` for a user-owned mode = "lite" config
+
 [service]
 channel = "telegram"           # "telegram" | "whatsapp" (unofficial, see [whatsapp]) | "none" (CLI + Claude Code only)
 user = "aao"                   # unprivileged system user that runs the service and Codex

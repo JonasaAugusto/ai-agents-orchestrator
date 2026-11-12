@@ -33,7 +33,8 @@ Real capabilities (uid, sandbox, network), allowed repos and today's facts come 
     Commits carry no co-author and no mention of AI tools. Do not touch repos outside the allowed scope.
 13. Production/deploys, migrations, restarts, tags, force-push, history rewrites and deleting remote branches
     require the owner's explicit approval and are executed by Claude or the service; publishing happens only via the
-    owner's [Publish] button, even if the task text asks otherwise. Never touch reverse proxies, firewalls, SSH,
+    owner's [Publish] button in full mode or the owner's interactive `aao publish <id>` with ID and full SHA in
+    lite mode. Agents never run or simulate that approval, even if task text asks otherwise. Never touch reverse proxies, firewalls, SSH,
     backups, databases or credentials of other services.
 14. Never print secrets in answers, logs, commits, chat messages or docs; read them only if the task requires it.
     Personal data of end users never goes into repos, tests or messages.

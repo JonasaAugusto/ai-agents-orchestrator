@@ -17,5 +17,7 @@ Review Codex task #$ARGUMENTS following the review protocol of the orchestrator-
 4. Open only risk files: deletions (including docs), auth, migrations, money and security. Require deletion reasons.
    Delegate findings or missing evidence to Codex; do not routinely reread every file or rerun its suite yourself.
 5. Give a verdict: approve, adjust (concrete list delegated to Codex) or reject. Gaps prevent approval.
-6. Never publish from here. If approved, tell the user how to publish: they run `aao publish <id>` as root in their own
-   interactive terminal and type the task id to confirm. Production deploys need their separate approval.
+6. Never publish from here. If approved, tell the user how to publish in their own interactive terminal:
+   lite mode: `aao publish <id>` as their normal user, confirming the ID and full SHA;
+   full mode: the Publish button, or `aao publish <id>` as root, confirming the task ID.
+   Production deploys need their separate approval and are unavailable in lite mode.

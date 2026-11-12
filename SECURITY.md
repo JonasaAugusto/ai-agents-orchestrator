@@ -13,6 +13,15 @@ Only the latest release receives security fixes.
 
 ## Threat model in short
 
+These privileged-service guarantees describe **full mode**. In **lite mode**, `aao serve`
+runs as the caller and shares that account's files, official CLI logins and Git credentials
+with the engines. There is no isolation, root daemon, remote channel, Publish button or
+deployment runner. `aao publish <id>` requires a human terminal and confirmation of the
+task ID and full SHA; a changed commit/destination is rejected and pushes never force.
+This is a workflow safeguard, not a security boundary against a process under the same uid:
+such a process can modify the config/state or simulate a terminal. Use full mode when
+privileged separation is needed. `aao doctor` reports the active mode and its limits.
+
 - The chat channel account (Telegram or WhatsApp) is a control plane: whoever controls it can queue tasks and press
   publish buttons. Enable two-step verification on it. Only one owner id is accepted; everything else is ignored.
 - Codex is untrusted code execution. By default it runs as an unprivileged user, inside its `workspace-write`

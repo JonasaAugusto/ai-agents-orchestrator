@@ -51,6 +51,8 @@ def env_git(cfg: Config, repo: str | None = None) -> dict:
     e = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(cfg.state_dir), "LC_ALL": "C.UTF-8", "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1",
          "GIT_AUTHOR_NAME": cfg.autor_nome, "GIT_AUTHOR_EMAIL": cfg.autor_email,
          "GIT_COMMITTER_NAME": cfg.autor_nome, "GIT_COMMITTER_EMAIL": cfg.autor_email}
+    if cfg.mode == "lite":
+        e["PATH"] = os.environ.get("PATH", e["PATH"])
     if repo:
         chave = cfg.state_dir / ".ssh" / f"deploy-{repo}"
         e["GIT_SSH_COMMAND"] = (f"ssh -i {chave} -o IdentitiesOnly=yes -o BatchMode=yes "
@@ -65,7 +67,7 @@ def git(cfg: Config, args: list[str], cwd: Path | str | None = None, repo: str |
         raise GitErro(f"forbidden git argument: {' '.join(args)[:80]}")
     # Engines may write their workspace and /tmp. Keep service Git config outside both.
     # When called as root (CLI), its temporary parent must also be outside service control.
-    if os.geteuid() == 0:
+    if os.geteuid() == 0 and cfg.mode != "lite":
         temporarios = cfg.shared_state / "private" / "git"
         os.close(arquivos_root.abrir_dir(temporarios, modo=0o700))
     else:
@@ -116,7 +118,7 @@ def auditar(cfg: Config, acao: str, repo: str, ref: str = "", hash_: str = "", r
     """Append-only log (O_APPEND). Optionally protect it with `chattr +a`."""
     linha = json.dumps({"quando": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "acao": acao, "repo": repo, "ref": ref,
                         "hash": hash_, "resultado": resultado, "extra": extra[:200]}, ensure_ascii=False) + "\n"
-    if os.geteuid() == 0:
+    if os.geteuid() == 0 and cfg.mode != "lite":
         fd = arquivos_root.abrir_append(cfg.shared_state / "private" / "auditoria-workspace.jsonl")
     else:
         cfg.logs.mkdir(parents=True, exist_ok=True)

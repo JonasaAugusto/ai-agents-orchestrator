@@ -21,7 +21,19 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_DIR.parent.parent  # source checkout root (src layout); examples live here
 NOME = "ai-agents-orchestrator"
 CLI = "aao"
-CONFIG_FILE = Path(os.environ.get("AAO_CONFIG", f"/etc/{NOME}/config.toml"))
+def user_config_dir() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / NOME
+
+
+def default_config_file() -> Path:
+    if os.environ.get("AAO_CONFIG"):
+        return Path(os.environ["AAO_CONFIG"])
+    local = user_config_dir() / "config.toml"
+    system = Path(f"/etc/{NOME}/config.toml")
+    return local if local.exists() or not system.exists() else system
+
+
+CONFIG_FILE = default_config_file()
 ENV_FILE = Path(os.environ.get("AAO_ENV_FILE", f"/etc/{NOME}/env"))
 DEV_TREE = Path(os.environ.get("AAO_DEV_TREE", f"/srv/{NOME}"))  # git checkout the owner reviews and merges into
 INSTALADO = Path(os.environ.get("AAO_INSTALLED", f"/opt/{NOME}"))  # root-owned copy that actually runs
@@ -82,6 +94,7 @@ def ler_env_file(caminho: Path = ENV_FILE) -> dict[str, str]:
 
 @dataclass
 class Config:
+    mode: str = "full"  # full: privileged daemon; lite: current user, one service process
     state_dir: Path = Path(f"/var/lib/{NOME}")
     root_state: Path = Path(f"/var/lib/{NOME}-root")  # bare clones used by the root daemon for pushes (root only)
     fonte_transcripts: Path = Path("/root/.claude/projects/-root")  # Claude Code transcripts of the watched project
@@ -150,6 +163,8 @@ class Config:
     # --- derived paths
     @property
     def shared_state(self) -> Path:
+        if self.mode == "lite":
+            return self.state_dir / "shared"
         # A sibling: the service may write state_dir but cannot rename these root-owned children.
         return self.state_dir.with_name(self.state_dir.name + "-root-shared")
     @property
@@ -171,7 +186,8 @@ class Config:
     @property
     def logs(self) -> Path: return self.state_dir / "logs"
     @property
-    def codex_home(self) -> Path: return self.state_dir / ".codex"
+    def codex_home(self) -> Path:
+        return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) if self.mode == "lite" else self.state_dir / ".codex"
     @property
     def db_estado(self) -> Path: return self.state_dir / "estado.db"
     @property
@@ -188,7 +204,7 @@ class Config:
 
     def preparar_dirs(self) -> None:
         for d in (self.spool, self.workspaces, self.resultados, self.handoffs, self.para_claude,
-                  self.logs, self.codex_home):
+                  self.logs, *((self.codex_home,) if self.mode == "full" else ())):
             d.mkdir(parents=True, exist_ok=True)
             os.chmod(d, 0o700)
 
@@ -285,7 +301,24 @@ def carregar_repos(dados: dict | None = None) -> dict:
 def carregar(env: dict[str, str] | None = None, arquivo: Path | None = None) -> Config:
     e = dict(os.environ) if env is None else env
     dados = ler_toml(Path(e.get("AAO_CONFIG") or str(arquivo or CONFIG_FILE)))
-    c = Config()
+    mode = e.get("AAO_MODE", dados.get("mode", "full"))
+    if mode not in ("full", "lite"):
+        raise ValueError("mode must be 'full' or 'lite'")
+    c = Config(mode=mode)
+    if mode == "lite":
+        import getpass
+        base = Path(e.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / NOME
+        conf = Path(e.get("AAO_CONFIG") or str(arquivo or CONFIG_FILE)).parent
+        c.state_dir, c.root_state = base, base / "publisher"
+        c.service_user = getpass.getuser()
+        c.socket = base / "cli.sock"
+        c.root_socket = base / "unused-root.sock"
+        c.publish_manifest, c.publish_key_file = conf / "publish.json", conf / "publish.key"
+        c.rules_file, c.division_file = conf / "BASE_RULES.md", conf / "DIVISION.md"
+        c.templates_dir = conf / "templates"
+        c.fonte_transcripts = Path.home() / ".claude/projects"
+        c.fonte_memoria = c.fonte_transcripts / "memory"
+        c.claude_sessions_dir = Path.home() / ".claude/sessions"
     for chave, (attr, tipo) in ENV_MAP.items():
         secao, nome = chave.split(".")
         v = (dados.get(secao) or {}).get(nome) if isinstance(dados.get(secao), dict) else None
@@ -301,6 +334,13 @@ def carregar(env: dict[str, str] | None = None, arquivo: Path | None = None) -> 
             setattr(c, attr, _conv(v, tipo))
         except (TypeError, ValueError):
             continue
+    if c.mode == "lite":
+        if "AAO_PATHS_SOCKET" not in e and not (dados.get("paths") or {}).get("socket"):
+            c.socket = c.state_dir / "cli.sock"
+        # Remote channels and the legacy deploy-key path belong to full mode.
+        c.channel, c.push_modo, c.claude_wakeup = "none", "root", False
+        if "AAO_PATHS_CLAUDE_MEMORY" not in e and not (dados.get("paths") or {}).get("claude_memory"):
+            c.fonte_memoria = c.fonte_transcripts / "memory"
     c.max_codex_simultaneos = max(1, c.max_codex_simultaneos)
     c.claude_sonda_minutos = max(1, c.claude_sonda_minutos)
     c.task_timeout = max(1, c.task_timeout)
