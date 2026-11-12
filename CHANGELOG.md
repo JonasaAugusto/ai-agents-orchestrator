@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-12
+
 ### Added
 - `aao mcp`: minimal MCP server on stdio (standard library only) with `delegate` (including `model`/`effort`), `status`, `result` and `review`. It never publishes; publishing stays a human approval in the CLI. Registration: `claude mcp add aao -- aao mcp`.
 - `lite.transcripts_project` (or `AAO_LITE_TRANSCRIPTS_PROJECT`): names the project whose Claude Code transcripts the lite mirror reads, instead of relying on the directory where `aao serve` runs. Accepts a project path or the encoded folder name. `aao setup` asks for it and `aao doctor` reports a `transcripts project` check with the exact fix.
@@ -12,10 +14,14 @@ All notable changes to this project are documented here. The format follows
 - `aao publish <id> --pr`: pushes the approved `agent/*` SHA (never force) and opens a pull request with `gh` instead of merging into the base; same interactive confirmation, lite and full mode; fails before any push when `gh` is missing or logged out; the PR text has no secrets or conversation.
 
 ### Fixed
+- `aao publish --pr`: the commit SHA in the PR body no longer goes through the secret mask (it altered hashes containing phone-like digit runs).
+- Lite mode: an unreadable transcripts folder is now a warning in `aao doctor` instead of an exception.
 - `examples/offline_relay.py` builds its disposable source repository with `git add`/`git commit` instead of `git fast-import`, inherits `PATH` (the old minimal `PATH` hid git on Windows) and writes bytes as-is; the test now runs on Windows too.
 - Typing: `file_lock`, `ProcessJob`, `which`, the IPC client, the usage window and the mirror export now type-check without `# type: ignore`.
 
 ### Changed
+- README.pt-BR now has the complete Features, Telegram commands, CLI, configuration, FAQ, limitations and roadmap sections.
+- `docs/first-10-minutes.md` adds installation and first use on Windows PowerShell, limited to what CI verifies.
 - WhatsApp is now clearly an optional, unofficial extra with ban risk: out of the first screen of both READMEs, `pip install '...[whatsapp]'`, the library is imported lazily, the wizard says it is an unofficial extra and checks the library, and `aao doctor` warns when the library is installed but unused. Existing WhatsApp setups keep working.
 - mypy now runs with `check_untyped_defs` over the lite runtime, IPC, compat, usage measurement, config, mirror and doctor, plus a `--platform win32` pass over the portable modules in CI.
 
