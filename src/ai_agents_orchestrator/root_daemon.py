@@ -30,7 +30,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import config, espelho, gitseguro
+from . import arquivos_root, config, espelho, gitseguro
 from .config import CLI, Config
 
 MANIFESTO = Config().publish_manifest  # replaced by cfg.publish_manifest at runtime
@@ -48,8 +48,7 @@ def assinar(chave: bytes, repo: str, commit: str, acao: str, nonce: str, exp: in
 
 def _auditar(cfg: Config, evento: dict) -> None:
     evento["quando"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    cfg.logs.mkdir(parents=True, exist_ok=True)
-    fd = os.open(cfg.logs.parent / "auditoria-root.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    fd = arquivos_root.abrir_append(cfg.shared_state / "private" / "auditoria-root.jsonl")
     try:
         os.write(fd, (json.dumps(evento, ensure_ascii=False) + "\n").encode())
     finally:
@@ -174,7 +173,7 @@ def publicar(cfg: Config, req: dict, chave: bytes, manifesto: dict | None = None
     try:
         repo, commit, acao = str(req["repo"]), str(req["commit"]), str(req["acao"])
         nonce, exp, mac = str(req["nonce"]), int(req["exp"]), str(req["mac"])
-    except (KeyError, ValueError):
+    except (KeyError, ValueError, TypeError):
         return {"ok": False, "erro": "malformed request"}
     if not chave or not hmac.compare_digest(mac, assinar(chave, repo, commit, acao, nonce, exp)):
         _auditar(cfg, {"op": "publicar", "repo": repo, "acao": acao, "resultado": "invalid signature"})
@@ -227,7 +226,14 @@ def _git(cfg: Config, args: list[str], cwd: str | Path | None = None, timeout: i
 def _git_do_workspace(cfg: Config, args: list[str], cwd: str | Path | None = None, timeout: int = 180) -> subprocess.CompletedProcess:
     """git that reads the service-owned workspace (fetch from it): no system/global config, every exec-capable key
     overridden, local transport only. Nothing from the workspace .git/config can run code as root."""
-    return gitseguro.git_endurecido(args, cwd=cwd, env=_env_push(cfg), timeout=timeout)
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        safe = list(args)
+        for i, value in enumerate(safe):
+            p = Path(value)
+            if p.is_dir() and (p / "HEAD").is_file() and p != Path(cwd or "/"):
+                safe[i] = str(stack.enter_context(gitseguro.repositorio_isolado(p)))
+        return gitseguro.git_endurecido(safe, cwd=cwd, env=_env_push(cfg), timeout=timeout)
 
 
 def url_do_repo(cfg: Config, repo: str) -> str | None:
@@ -245,7 +251,7 @@ def assinatura_ok(chave: bytes, req: dict, acao: str, agora: float) -> str | Non
     """None = ok; otherwise the error message. Checks HMAC, expiry and nonce (single use)."""
     try:
         repo, commit, nonce, exp, mac = (str(req["repo"]), str(req["commit"]), str(req["nonce"]), int(req["exp"]), str(req["mac"]))
-    except (KeyError, ValueError):
+    except (KeyError, ValueError, TypeError):
         return "malformed request"
     if not chave or not hmac.compare_digest(mac, assinar(chave, repo, commit, acao, nonce, exp)):
         return "invalid signature"
@@ -260,9 +266,13 @@ def assinatura_ok(chave: bytes, req: dict, acao: str, agora: float) -> str | Non
     return None
 
 
+def acao_push(branch: str, destino: str, tid: int) -> str:
+    return "push-base:" + json.dumps([branch, destino, tid], separators=(",", ":"))
+
+
 def push(cfg: Config, req: dict, chave: bytes = b"", agora: float | None = None) -> dict:
     """`push` operation. req: repo (key in `repos`), tid (int, agent workspace), branch (`agent/...`),
-    modo ("branch" | "base"). "base" requires a signed request (HMAC; commit=branch, acao="push-base") and merges
+    modo ("branch" | "base"). "base" signs the exact commit, repo, branch, tid and destination and merges
     the branch --no-ff on top of the remote's CURRENT base (fast-forward required). Never force, tag or delete."""
     agora = agora if agora is not None else time.time()
     modo = str(req.get("modo", "branch"))
@@ -283,10 +293,6 @@ def push(cfg: Config, req: dict, chave: bytes = b"", agora: float | None = None)
         tid = int(req["tid"])
     except (KeyError, ValueError, TypeError):
         return negar("invalid tid")
-    if modo == "base":
-        erro = assinatura_ok(chave, {**req, "commit": branch}, "push-base", agora)
-        if erro:
-            return negar(erro)
     ws = (cfg.workspaces / repo / str(tid)).resolve()
     if ws.parent != (cfg.workspaces / repo).resolve() or not (ws / ".git").exists():
         return negar("invalid workspace")
@@ -294,10 +300,20 @@ def push(cfg: Config, req: dict, chave: bytes = b"", agora: float | None = None)
     if not re.match(r"^[A-Za-z0-9._-]+$", base):
         return negar("invalid base")
 
+    if modo == "base":
+        commit = str(req.get("commit", ""))
+        destino_aprovado = str(req.get("destino", ""))
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
+            return negar("invalid approved commit")
+        erro = assinatura_ok(chave, req, acao_push(branch, destino_aprovado, tid), agora)
+        if erro:
+            return negar(erro)
+        if destino_aprovado != base:
+            return negar("approved destination changed")
+
     root_git = cfg.root_state / f"{repo}.git"
     try:
-        cfg.root_state.mkdir(parents=True, exist_ok=True)
-        os.chmod(cfg.root_state, 0o700)
+        os.close(arquivos_root.abrir_dir(cfg.root_state, modo=0o700))
         if not root_git.exists():
             _git(cfg, ["init", "--bare", "-q", str(root_git)])
         # 1) fetch the workspace commit into root's clone (objects only; nothing from the workspace .git/config applies)
@@ -307,6 +323,8 @@ def push(cfg: Config, req: dict, chave: bytes = b"", agora: float | None = None)
         if f.returncode != 0:
             return negar("branch not found in the workspace")
         sha = _git(cfg, ["rev-parse", inc], root_git).stdout.strip()
+        if modo == "base" and sha != commit:
+            return negar("approved commit changed")
         destino, alvo = f"refs/heads/{branch}", sha
         if modo == "base":
             # 2) current base from the remote (authenticated by root); merge without worktree; fast-forward required
@@ -468,12 +486,13 @@ class RootClient:
     def push_branch(self, repo: str, tid: int, branch: str) -> dict:
         return self.chamar({"op": "push", "repo": repo, "tid": tid, "branch": branch, "modo": "branch"}, 200)
 
-    def push_base(self, repo: str, tid: int, branch: str, agora: float | None = None) -> dict:
+    def push_base(self, repo: str, tid: int, branch: str, *, commit: str, destino: str, agora: float | None = None) -> dict:
         """Merge the branch into the base + push; signed (HMAC) because only the [Publish] button may trigger it."""
         agora = agora if agora is not None else time.time()
         nonce, exp = uuid.uuid4().hex, int(agora + 300)
         return self.chamar({"op": "push", "repo": repo, "tid": tid, "branch": branch, "modo": "base", "nonce": nonce, "exp": exp,
-                            "commit": branch, "mac": assinar(self.chave, repo, branch, "push-base", nonce, exp)}, 200)
+                            "commit": commit, "destino": destino,
+                            "mac": assinar(self.chave, repo, commit, acao_push(branch, destino, tid), nonce, exp)}, 200)
 
     def publicar(self, repo: str, commit: str, acao: str, agora: float | None = None) -> dict:
         agora = agora if agora is not None else time.time()

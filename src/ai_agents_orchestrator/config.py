@@ -134,13 +134,17 @@ class Config:
 
     # --- derived paths
     @property
-    def mirror(self) -> Path: return self.state_dir / "mirror"
+    def shared_state(self) -> Path:
+        # A sibling: the service may write state_dir but cannot rename these root-owned children.
+        return self.state_dir.with_name(self.state_dir.name + "-root-shared")
+    @property
+    def mirror(self) -> Path: return self.shared_state / "mirror"
     @property
     def spool(self) -> Path: return self.state_dir / "spool"
     @property
     def workspaces(self) -> Path: return self.state_dir / "workspaces"
     @property
-    def repos_dir(self) -> Path: return self.state_dir / "repos"
+    def repos_dir(self) -> Path: return self.shared_state / "repos"
     @property
     def resultados(self) -> Path: return self.state_dir / "resultados"
     @property

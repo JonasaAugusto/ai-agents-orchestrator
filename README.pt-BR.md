@@ -133,7 +133,8 @@ ou peça em linguagem natural: *"abre o codex"*, *"mostra o que o codex está fa
 `service.channel = "telegram" | "whatsapp" | "none"`. A lógica do bot é independente do canal (interface em `canal.py`).
 
 **WhatsApp (não oficial, por sua conta e risco)**: substitui o Telegram por completo (pedidos ao Codex, avisos,
-aprovações por resposta numerada "1. Publish / 2. Review first", comandos).
+aprovações por código específico da mensagem, como `a1b2c3d4:1`, comandos). Responder apenas `1` não aprova
+ações; cada mensagem nova invalida opções anteriores e cada código só pode ser usado uma vez.
 
 > ⚠️ **AVISO:** usa um cliente **não oficial** do WhatsApp Web (pacote opcional `neonize`). **Não tem vínculo com o
 > WhatsApp nem com a Meta**, **pode violar os Termos de Serviço do WhatsApp** e **o número pode ser restringido ou
@@ -144,6 +145,12 @@ Proteções: fala só com `whatsapp.owner_number` (ignora outros números e grup
 (limite por minuto e intervalo mínimo), reconexão com backoff exponencial que para de vez em logout ou banimento
 temporário, sessão em `<state_dir>/whatsapp` (0700/0600), fora de qualquer repositório e no `.gitignore`. O
 pareamento é feito no `aao setup`, com código de pareamento ou QR code no terminal.
+
+Na 1.0.2, espelhos e cópias dos repositórios ficam em `<state_dir>-root-shared/{mirror,repos}`, com pais controlados
+por root. Na atualização, o operador reinicia os dois componentes na mesma versão, atualiza os espelhos e gera novos
+botões de aprovação. Referências a caminhos e permissões personalizadas precisam acompanhar a mudança antes do
+reinício. Aprovações fixam SHA, repositório e destino; Git de entrega usa configuração privada. Hooks levam somente
+ids e estados; relatórios consultados são dados não confiáveis. Detalhes em [SECURITY.md](SECURITY.md).
 
 ## Limitações e roteiro
 

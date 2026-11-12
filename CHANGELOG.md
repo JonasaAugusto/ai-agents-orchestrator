@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-12
+
+### Security
+- Privileged mirror files and exported repositories now live in a root-controlled sibling of the service state
+  directory (`<state_dir>-root-shared`). Audit and lock files use its private subdirectory. Directory descriptors,
+  no-follow opens and exclusive temporary files protect writes; untrusted parents are refused.
+- Workspace Git uses a private configuration authored by the service, including for local clone sources; mutable
+  repository config is never loaded for delivery operations. The old config check remains a tampering diagnostic.
+- Publish approvals bind the reviewed commit SHA, repository, branch, task and destination. Changed branches or
+  destinations require a new approval; legacy buttons and signatures must be recreated after upgrading.
+- Git probes in `aao doctor` run in a neutral directory with controlled configuration.
+- WhatsApp approvals require the message's exact action code (for example `a1b2c3d4:1`). Bare numbers do not approve
+  actions. A new send invalidates older options; concurrent sends and answer resolution are synchronized.
+- Claude hooks carry only task identifiers and fixed states. Agent-authored content is consulted explicitly as
+  untrusted data. Structured event masking also redacts values by sensitive field name, regardless of value format.
+
+### Upgrade
+- Refresh mirrors with the upgraded root daemon before resuming tasks. It creates the protected sibling directories;
+  existing shared mirrors are not reused. The parent of `state_dir` must be controlled by root. Review custom path
+  references, filesystem permissions and systemd write restrictions before restarting (operator action).
+
 ### Documentation
 
 - Quickstart now clones the repository first, so `rules/`, `examples/` and `templates/` exist for the copy steps;

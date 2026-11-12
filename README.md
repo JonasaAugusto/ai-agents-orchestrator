@@ -92,6 +92,13 @@ flowchart LR
 
 Read [SECURITY.md](SECURITY.md) for the threat model and how to report vulnerabilities.
 
+Version 1.0.2 stores root-generated mirrors in `<state_dir>-root-shared/mirror` and exported repositories in
+`<state_dir>-root-shared/repos`. The sibling parent must be controlled by root. On upgrade, the operator restarts
+both components, refreshes mirrors and recreates approval buttons; old approvals are invalid. Update custom path
+references and filesystem write restrictions before restarting. See [SECURITY.md](SECURITY.md) for the boundaries.
+Git delivery ignores mutable workspace config; publishing is pinned to the reviewed SHA, repository and destination.
+Hook notices contain ids/states only; consulted reports are untrusted data.
+
 ## Quickstart
 
 Linux with systemd, Python 3.11+, git, the [Codex CLI](https://github.com/openai/codex) and
@@ -242,8 +249,8 @@ a repository is known), every state change asks for a button, buttons are HMAC-s
 work once per group. Only `telegram.chat_id`, in a private chat, is answered.
 
 **WhatsApp (unofficial, at your own risk).** A full replacement for Telegram: free-text prompts to Codex, task
-notifications, approvals and commands, with buttons rendered as numbered replies ("1. Publish / 2. Review first /
-3. Don't publish").
+notifications, approvals and commands. Buttons show an exact action code such as `a1b2c3d4:1`; bare numbers
+do not approve actions. Each new message invalidates older options, and a code is accepted only once.
 
 > ⚠️ **WARNING:** this channel uses an **unofficial** WhatsApp Web client (the optional `neonize` package). It is **not
 > affiliated with, endorsed by or supported by WhatsApp or Meta**. It **may violate WhatsApp's Terms of Service** and

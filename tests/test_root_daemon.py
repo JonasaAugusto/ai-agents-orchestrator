@@ -44,7 +44,7 @@ class Publicar(Base):
         r = rd.publicar(self.cfg, self.pedido(), CHAVE, self.man)
         self.assertTrue(r["ok"])
         self.assertTrue(self.marca.exists())
-        self.assertIn("publicar", (self.cfg.state_dir / "auditoria-root.jsonl").read_text())
+        self.assertIn("publicar", (self.cfg.shared_state / "private" / "auditoria-root.jsonl").read_text())
 
     def test_assinatura_invalida_expirado_e_replay(self):
         p = self.pedido()
@@ -215,7 +215,9 @@ class Push(Base):
 
     def assinado(self, nonce="n", branch="agent/7-x", chave=CHAVE, **kw):
         exp = int(time.time()) + 300
-        r = self.req(modo="base", nonce=nonce, exp=exp, commit=branch, mac=rd.assinar(chave, "docs", branch, "push-base", nonce, exp))
+        commit = _sh("git", "rev-parse", branch, cwd=self.ws).strip()
+        r = self.req(modo="base", nonce=nonce, exp=exp, commit=commit, destino="main",
+                     mac=rd.assinar(chave, "docs", commit, rd.acao_push(branch, "main", 7), nonce, exp))
         r.update(kw)
         return r
 
@@ -224,7 +226,7 @@ class Push(Base):
         return p.stdout.strip() if p.returncode == 0 else None
 
     def audit(self):
-        return (self.cfg.state_dir / "auditoria-root.jsonl").read_text()
+        return (self.cfg.shared_state / "private" / "auditoria-root.jsonl").read_text()
 
     def test_push_de_branch_funciona_e_e_auditado(self):
         r = rd.push(self.cfg, self.req())
@@ -274,7 +276,7 @@ class Push(Base):
 
     def test_base_exige_assinatura_e_faz_merge_fast_forward(self):
         r = rd.push(self.cfg, self.req(modo="base"), CHAVE)
-        self.assertEqual(r["erro"], "malformed request")
+        self.assertEqual(r["erro"], "invalid approved commit")
         self.assertEqual(rd.push(self.cfg, self.assinado(chave=b"x" * 32), CHAVE)["erro"], "invalid signature")
         self.assertEqual(rd.push(self.cfg, self.assinado(), b"")["erro"], "invalid signature")
         main0 = self.remoto("refs/heads/main")

@@ -28,7 +28,7 @@ class AmbienteFalso(doctor.Ambiente):
         self.comandos.append(cmd)
         if "login" in cmd:
             return (0, "Logged in using ChatGPT") if self.login_ok else (1, "Not logged in")
-        if cmd[:2] == ["git", "ls-remote"]:
+        if cmd[0] == "git" and "ls-remote" in cmd:
             return (0, "abc\tHEAD") if self.git_ok else (128, "fatal")
         return 1, ""
 

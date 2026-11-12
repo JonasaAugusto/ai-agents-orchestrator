@@ -81,13 +81,13 @@ class RootFalso:
         from . import root_daemon as rd
         return rd.push(self.cfg, {"repo": repo, "tid": tid, "branch": branch, "modo": "branch"})
 
-    def push_base(self, repo, tid, branch, agora=None):
+    def push_base(self, repo, tid, branch, *, commit, destino, agora=None):
         import time, uuid
         from . import root_daemon as rd
         self.chamadas.append(("push_base", repo, tid, branch))
         if not self.cfg:
             return {"ok": True, "hash": "0" * 40}
         nonce, exp = uuid.uuid4().hex, int(time.time() + 300)
-        req = {"repo": repo, "tid": tid, "branch": branch, "modo": "base", "nonce": nonce, "exp": exp, "commit": branch,
-               "mac": rd.assinar(self.CHAVE, repo, branch, "push-base", nonce, exp)}
+        req = {"repo": repo, "tid": tid, "branch": branch, "modo": "base", "nonce": nonce, "exp": exp, "commit": commit, "destino": destino,
+               "mac": rd.assinar(self.CHAVE, repo, commit, rd.acao_push(branch, destino, tid), nonce, exp)}
         return rd.push(self.cfg, req, self.CHAVE)

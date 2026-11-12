@@ -22,27 +22,45 @@ Only the latest release receives security fixes.
 - The root daemon accepts a fixed set of operations from the service uid only, pushes only `agent/*` branches
   to allowlisted GitHub repositories, never force-pushes, tags or deletes, and runs deploy commands only from an exact
   allowlist with an HMAC-signed, expiring, single-use request.
-- Masking of secrets and personal data is pattern based: a secret in a novel format can slip through.
+- Masking uses content patterns and sensitive field names in structured events: an unlabelled secret in a novel
+  format can still slip through.
 - The WhatsApp channel uses an unofficial client; see the warning in the README.
 
-## Hardening notes (1.0.1)
+## Hardening notes (1.0.2)
 
-- **Root never honours repository config it does not own.** Git config and hooks can execute commands
-  (`core.fsmonitor`, `core.hooksPath`, `credential.helper=!cmd`, `core.gitProxy`, `url.*.insteadOf`, filter drivers).
-  Every git call made as root goes through `gitseguro`: in repositories that someone else may write it runs with
-  `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `-c core.fsmonitor=false -c core.hooksPath=/dev/null
-  -c credential.helper= -c core.gitProxy= -c protocol.ext.allow=never` and local transport only. No
-  `safe.directory=*` is used anywhere.
+- **Privileged filesystem state:** masked mirrors and exported repositories live under
+  `<paths.state_dir>-root-shared/{mirror,repos}`, a root-owned 0750 sibling of the service-writable state directory.
+  Its `private` directory (0700) holds the root audit logs (0600), including workspace audit when invoked by the
+  root CLI, and mirror lock. Root validates parents using
+  directory descriptors and `O_NOFOLLOW`; it refuses service-owned/writable parents and symlink directories.
+  Atomic writes use unpredictable exclusive temporary files and descriptor-relative rename. Append opens refuse
+  symlinks, non-regular files, hard links and files with an unexpected owner or permissions. Old mirror and audit
+  paths under `state_dir` are not reused. A root-owned sticky temporary parent is supported for disposable tests.
 - **Mirrors:** the root daemon fetches into its own bare clones under `paths.root_state_dir/mirror` (0700) and then
-  publishes a fresh copy to `<state_dir>/repos/<name>.git` for the service (built in a root-only staging directory,
-  swapped in by rename; `<state_dir>/repos` itself is root-owned 0750). Root never runs git inside the service's copy,
-  so a rewritten `config` or planted hook there is simply discarded at the next refresh. This doubles the disk used
-  by mirrors.
-- **`aao watch` and `aao install`** read a directory owned by another user as that user (root drops to the owner's
-  uid), hardened, so nothing in it runs with root's privileges.
-- **Workspace git** (commits, patches, pushes made by the service outside Codex's sandbox) always overrides hooks,
-  fsmonitor, credential helpers and proxies, and refuses to deliver when the workspace `.git/config` contains keys
-  outside a small allowlist (e.g. filter/diff/merge drivers, `include.path`).
+  exports a fresh copy for the service through a protected parent. Root never runs Git inside the service's copy;
+  config/hooks planted there are discarded at the next refresh. This doubles the disk used by mirrors.
+- **Workspace Git:** delivery runs against a fresh private gitdir with a configuration authored by the service,
+  controlled global/system config, disabled hooks/fsmonitor/helpers and fixed remote URLs from operator config.
+  Temporary configuration lives outside the engine workspace and system temporary directory (under service spool,
+  or the protected root-private sibling when the caller is root). Only object/ref storage and explicit metadata are shared; the mutable `.git/config` is never loaded. Local clone
+  sources and the daemon's workspace fetch use the same private view. A config allowlist remains a diagnostic,
+  with no safety dependency on the time between checking it and running Git. Delivery supports standalone clones
+  with a `.git` directory; linked-worktree/gitdir-file layouts are refused. Separate engine/service uids remain
+  recommended: a private directory is not a boundary against unrestricted code running as its owner.
+- **`aao watch` and `aao install`** read another user's directory as that user (root drops to the owner's uid), with
+  exec-capable config overrides. **`aao doctor`** probes Git from `/`, with controlled system/global config; it does
+  not inherit the invoking checkout's local configuration. Root's own credential helper remains available there.
+- **Publish approval:** callbacks authenticate the payload including reviewed SHA, repository, branch, task and
+  destination. The daemon's expiring, single-use HMAC covers those fields; the fetched commit must match before
+  integration. The daemon merges the approved object id, even if the agent changes its branch during the request.
+  A changed destination also requires fresh approval. Root CLI captures and displays these fields before confirmation.
+- **WhatsApp:** approvals use a random per-message action code, consumed once; bare numbers never select actions.
+  Every new outgoing message invalidates earlier options before transport starts; options activate only after a
+  complete successful send. Sends are serialized, while reply resolution uses a separate lock.
+- **Claude hook notifications:** only integer task ids and states from a fixed vocabulary enter the prompt.
+  Titles, descriptions, branches and reports remain untrusted data to consult explicitly, not hook instructions.
+- **Structured masking:** sensitive key names (including nested API keys, tokens, passwords, credentials and
+  authorization values) redact the entire value, including objects and numbers, in addition to content patterns.
 - **Secrets in the service process:** at start the service calls `prctl(PR_SET_DUMPABLE, 0)` (Linux), so a process of
   the same uid (Codex) can no longer read `/proc/<pid>/environ` or `/proc/<pid>/mem` nor ptrace it, and removes
   `AAO_TELEGRAM_TOKEN` / `AAO_PUBLISH_KEY` from its environment after reading them. There is a brief window between
@@ -61,5 +79,8 @@ Only the latest release receives security fixes.
   a state from a fixed list, so a report written by Codex can never be injected into the Claude session.
 - **`config.toml`** is written 0640 root:<service group> (0600 if the group does not exist yet), since it holds the
   owner's chat id or phone number.
-- Known residual: the root daemon still writes the mirror files (`<state_dir>/mirror`) under the service-owned
-  state directory; a separate root-owned parent for them would remove that last shared path.
+- **Upgrade to 1.0.2:** the operator must restart both components with matching versions, refresh the mirrors and
+  regenerate approvals. Existing workspace trees stay usable; old buttons/HMAC requests are rejected. The parent
+  of `state_dir` must be root-controlled; update custom paths and filesystem write allowlists for the new sibling.
+  This release does not change the separate-uid recommendation, the brief startup secret window, or the fact that
+  an agent already running as root can bypass application-level approval.

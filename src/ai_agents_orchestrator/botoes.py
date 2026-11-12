@@ -19,14 +19,15 @@ class Botoes:
         self.estado, self.chat_id, self.expira, self.relogio = estado, int(chat_id), expira_seg, relogio
         self._chave = hashlib.sha256(b"aao-cb|" + token.encode()).digest()
 
-    def _mac(self, aid: str, op: str) -> str:
-        return hmac.new(self._chave, f"{aid}|{op}|{self.chat_id}".encode(), hashlib.sha256).hexdigest()[:12]
+    def _mac(self, aid: str, op: str, kind: str, payload: dict) -> str:
+        body = json.dumps([aid, op, self.chat_id, kind, payload], sort_keys=True, separators=(",", ":"))
+        return hmac.new(self._chave, body.encode(), hashlib.sha256).hexdigest()[:12]
 
     def teclado(self, kind: str, payload: dict, opcoes: list[tuple[str, str]], linhas: int | None = None,
                 agora: float | None = None) -> list[list[tuple[str, str]]]:
         """opcoes = [(label, op)]. Returns rows of (label, callback_data)."""
         ids = self.estado.nova_acao(kind, payload, [op for _r, op in opcoes], self.expira, agora if agora is not None else self.relogio())
-        botoes = [(r, f"{ids[op]}:{self._mac(ids[op], op)}") for r, op in opcoes]
+        botoes = [(r, f"{ids[op]}:{self._mac(ids[op], op, kind, payload)}") for r, op in opcoes]
         n = linhas or len(botoes)
         return [botoes[i:i + n] for i in range(0, len(botoes), n)]
 
@@ -41,9 +42,11 @@ class Botoes:
         r = self.estado.acao(aid)
         if not r:
             return None, "desconhecido", None
-        if not hmac.compare_digest(mac, self._mac(aid, r["op"])):
+        if not hmac.compare_digest(mac, self._mac(aid, r["op"], r["kind"], json.loads(r["payload"]))):
             return None, "assinatura", None
         linha, motivo = self.estado.consumir_acao(aid, agora if agora is not None else self.relogio())
         if not linha:
             return None, motivo, None
+        if not hmac.compare_digest(mac, self._mac(aid, linha["op"], linha["kind"], json.loads(linha["payload"]))):
+            return None, "assinatura", None
         return linha["kind"], json.loads(linha["payload"]), linha["op"]

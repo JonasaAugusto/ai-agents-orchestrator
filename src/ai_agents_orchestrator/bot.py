@@ -530,7 +530,7 @@ class Bot:
                 opcoes = [("Review first", "revisar"), ultimo]
                 if not workspace.sem_remoto(self.cfg, t["repo"]):
                     opcoes.insert(0, ("Publish", "publicar"))
-                kb = self.s.botoes.teclado("publicar", {"tid": t["id"]}, opcoes)
+                kb = self.s.botoes.teclado("publicar", self.s.aprovacao_publicacao(t["id"]), opcoes)
             return self.resp(txt, kb)
         if op in ("codex", "claude"):
             campos = {"dono": op}
@@ -560,10 +560,10 @@ class Bot:
             self.s.gerar_recado()
             return self.resp("I asked Claude for a review (note and board). When you want to publish, open /board > View.")
         self.resp("Merging and pushing to GitHub (no production deploy)...")
-        self._bg(lambda: self._publicar_bg(t["id"]))
+        self._bg(lambda: self._publicar_bg(t["id"], p))
 
-    def _publicar_bg(self, tid: int):
-        r = self.s.publicar_tarefa(tid)
+    def _publicar_bg(self, tid: int, aprovacao: dict):
+        r = self.s.publicar_tarefa(tid, aprovacao)
         if not r["ok"]:
             return self.resp(f"Publishing to GitHub failed: {r['erro']}")
         t = self.quadro.ver(tid)

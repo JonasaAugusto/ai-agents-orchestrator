@@ -7,9 +7,11 @@ import re
 import subprocess
 import time
 import unicodedata
+from contextlib import ExitStack
 from pathlib import Path
 
 from .config import Config
+from . import arquivos_root, gitseguro
 
 RX_PERIGO = re.compile(r"(?i)^(--force(-with-lease)?|-f|--delete|-d|--mirror|--tags|--prune|\+.*|:.*)(=.*)?$")
 
@@ -19,11 +21,11 @@ class GitErro(Exception):
 
 
 # Workspace git runs OUTSIDE Codex's sandbox while Codex can write the workspace's .git/config: never honour hooks,
-# fsmonitor, credential helpers, proxies or the ext:: transport from it (command-line config wins over repo config).
+# fsmonitor, credential helpers, proxies or filters from it. Git sees a private, fixed configuration.
 ENDURECER_WS = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=",
                 "-c", "core.gitProxy=", "-c", "protocol.ext.allow=never", "-c", "log.showSignature=false")
 # Keys a workspace .git/config may contain. Anything else (filter/diff/merge drivers, include*, core.* commands,
-# url.*.insteadOf, extensions.worktreeConfig...) could make git run code: the delivery is refused.
+# url.*.insteadOf, extensions.worktreeConfig...) is reported as tampering. This diagnostic is not a security boundary.
 RX_CONFIG_OK = re.compile(
     r"^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|"
     r"eol|safecrlf)|extensions\.(objectformat|refstorage)|remote\.(origin|github)\.(url|fetch)|"
@@ -33,7 +35,8 @@ RX_CONFIG_OK = re.compile(
 
 def verificar_config_ws(cfg: Config, ws: Path) -> None:
     """Raises GitErro if the workspace's local config holds a key outside the allowlist (planted by the agent)."""
-    r = git(cfg, ["config", "--local", "--no-includes", "--name-only", "--list"], ws, check=False)
+    # Diagnostic only: Git commands below never use this file, even if it changes now.
+    r = git(cfg, ["config", "--file", str(Path(ws) / ".git" / "config"), "--no-includes", "--name-only", "--list"], ws, check=False)
     ruins = sorted({k for k in r.stdout.splitlines() if k and not RX_CONFIG_OK.match(k.lower())})
     if ruins:
         raise GitErro("unsafe workspace .git/config (keys that can run code outside the sandbox): " + ", ".join(ruins[:6]))
@@ -45,13 +48,14 @@ def slug(texto: str, n: int = 30) -> str:
 
 
 def env_git(cfg: Config, repo: str | None = None) -> dict:
-    e = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(cfg.state_dir), "LC_ALL": "C.UTF-8", "GIT_TERMINAL_PROMPT": "0",
+    e = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(cfg.state_dir), "LC_ALL": "C.UTF-8", "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1",
          "GIT_AUTHOR_NAME": cfg.autor_nome, "GIT_AUTHOR_EMAIL": cfg.autor_email,
          "GIT_COMMITTER_NAME": cfg.autor_nome, "GIT_COMMITTER_EMAIL": cfg.autor_email}
     if repo:
         chave = cfg.state_dir / ".ssh" / f"deploy-{repo}"
         e["GIT_SSH_COMMAND"] = (f"ssh -i {chave} -o IdentitiesOnly=yes -o BatchMode=yes "
                                 f"-o UserKnownHostsFile={cfg.state_dir}/.ssh/known_hosts -o StrictHostKeyChecking=yes")
+    e.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_SYSTEM="/dev/null", GIT_CONFIG_GLOBAL="/dev/null")
     return e
 
 
@@ -59,8 +63,50 @@ def git(cfg: Config, args: list[str], cwd: Path | str | None = None, repo: str |
         check: bool = True, timeout: int = 300) -> subprocess.CompletedProcess:
     if any(RX_PERIGO.match(a) for a in args if a[:1] in "-+:"):
         raise GitErro(f"forbidden git argument: {' '.join(args)[:80]}")
-    r = subprocess.run(["git", *ENDURECER_WS, *args], cwd=cwd, env=env_git(cfg, repo), capture_output=True,
-                       text=True, timeout=timeout)
+    # Engines may write their workspace and /tmp. Keep service Git config outside both.
+    # When called as root (CLI), its temporary parent must also be outside service control.
+    if os.geteuid() == 0:
+        temporarios = cfg.shared_state / "private" / "git"
+        os.close(arquivos_root.abrir_dir(temporarios, modo=0o700))
+    else:
+        temporarios = cfg.spool / "git"
+        temporarios.mkdir(parents=True, mode=0o700, exist_ok=True)
+        os.chmod(temporarios, 0o700)
+    with ExitStack() as stack:
+        private_args = list(args)
+        prefix = []
+        directory = Path(cwd).absolute() if cwd else None
+        if directory and (directory / ".git").is_dir():
+            spec_name = repo or directory.parent.name
+            spec = cfg.repos.get(spec_name, {})
+            remotes = {"origin": cfg.repos_dir / f"{spec_name}.git"}
+            url = spec.get("github_url") or (f"git@github.com:{spec['github']}.git" if spec.get("github") else None)
+            if url:
+                remotes["github"] = url
+            private = stack.enter_context(gitseguro.repositorio_isolado(directory / ".git", directory,
+                                                                       remotes, escrever=True, temporarios=temporarios))
+            prefix = ["--git-dir", str(private), "--work-tree", str(directory)]
+        elif directory and (directory / "HEAD").is_file() and (directory / "objects").is_dir():
+            private = stack.enter_context(gitseguro.repositorio_isolado(directory, escrever=True, temporarios=temporarios))
+            prefix = ["--git-dir", str(private)]
+        elif directory:
+            raise GitErro("unsupported repository layout; refusing local configuration")
+        if prefix and (directory / ".git").is_dir() and private_args[0] == "config" and "--file" not in private_args:
+            private_args[1:1] = ["--file", str(directory / ".git" / "config")]
+        # A local clone/fetch must not let upload-pack load the source's config either.
+        if private_args and private_args[0] in ("clone", "fetch"):
+            for i, value in enumerate(private_args[1:], 1):
+                source = Path(value)
+                if not source.is_absolute() and directory:
+                    source = directory / source
+                if source.is_dir() and ((source / "HEAD").is_file() or (source / ".git" / "HEAD").is_file()):
+                    gd = source / ".git" if (source / ".git").is_dir() else source
+                    private_args[i] = str(stack.enter_context(gitseguro.repositorio_isolado(gd, temporarios=temporarios)))
+                    break
+        if private_args[0] == "clone":
+            private_args.insert(1, "--no-local")
+        r = subprocess.run(["git", *ENDURECER_WS, *prefix, *private_args], cwd=cwd or "/", env=env_git(cfg, repo),
+                           capture_output=True, text=True, timeout=timeout)
     if check and r.returncode != 0:
         raise GitErro((r.stderr or r.stdout).strip()[-300:])
     return r
@@ -70,8 +116,11 @@ def auditar(cfg: Config, acao: str, repo: str, ref: str = "", hash_: str = "", r
     """Append-only log (O_APPEND). Optionally protect it with `chattr +a`."""
     linha = json.dumps({"quando": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "acao": acao, "repo": repo, "ref": ref,
                         "hash": hash_, "resultado": resultado, "extra": extra[:200]}, ensure_ascii=False) + "\n"
-    cfg.logs.mkdir(parents=True, exist_ok=True)
-    fd = os.open(cfg.logs / "auditoria.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    if os.geteuid() == 0:
+        fd = arquivos_root.abrir_append(cfg.shared_state / "private" / "auditoria-workspace.jsonl")
+    else:
+        cfg.logs.mkdir(parents=True, exist_ok=True)
+        fd = os.open(cfg.logs / "auditoria.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         os.write(fd, linha.encode())
     finally:
@@ -105,13 +154,15 @@ def preparar_workspace(cfg: Config, repo: str, tid: int, titulo: str, base_ref: 
     if not ws.exists():
         ws.parent.mkdir(parents=True, exist_ok=True)
         git(cfg, ["clone", "--no-hardlinks", "--quiet", str(bare), str(ws)])
+        git(cfg, ["config", "remote.origin.url", str(bare)], ws)
         git(cfg, ["config", "user.name", cfg.autor_nome], ws)
         git(cfg, ["config", "user.email", cfg.autor_email], ws)
         git(cfg, ["config", "commit.gpgsign", "false"], ws)
         spec = cfg.repos[repo]
         url = spec.get("github_url") or (f"git@github.com:{spec['github']}.git" if spec.get("github") else None)
         if url:
-            git(cfg, ["remote", "add", "github", url], ws, check=False)
+            git(cfg, ["config", "remote.github.url", url], ws)
+            git(cfg, ["config", "remote.github.fetch", "refs/heads/*:refs/remotes/github/*"], ws)
         git(cfg, ["checkout", "-q", "-b", branch, f"origin/{base}"], ws)
     instalar_agents_md(cfg, ws, repo)
     return ws, branch, base
@@ -273,7 +324,7 @@ def _tid_do_ws(ws: Path) -> int:
         raise GitErro("invalid workspace")
 
 
-def merge_e_push(cfg: Config, repo: str, ws: Path, branch: str, root=None) -> dict:
+def merge_e_push(cfg: Config, repo: str, ws: Path, branch: str, root=None, commit: str | None = None, destino: str | None = None) -> dict:
     """Merges the branch into the base and pushes to GitHub. Guards: allowed repo, no force, remote fast-forward only,
     `agent/*` branches only, audit. Called ONLY from the validated [Publish] callback (or the approved CLI publish).
     "root" mode (default): the root daemon merges and pushes with root's credential (the service has no token).
@@ -283,10 +334,14 @@ def merge_e_push(cfg: Config, repo: str, ws: Path, branch: str, root=None) -> di
     base = base_do_repo(cfg, repo)
     if sem_remoto(cfg, repo):
         raise GitErro("repo without remote: Claude reviews the workspace branch and integrates it by hand")
+    current = git(cfg, ["rev-parse", f"refs/heads/{branch}"], ws).stdout.strip()
+    commit = commit or current
+    if current != commit or (destino is not None and destino != base):
+        raise GitErro("approved commit or destination changed")
     if cfg.push_modo == "root":
         if root is None:
             raise GitErro("root daemon unavailable for the push")
-        r = root.push_base(repo, _tid_do_ws(ws), branch)
+        r = root.push_base(repo, _tid_do_ws(ws), branch, commit=commit, destino=base)
         if not r.get("ok"):
             auditar(cfg, "merge", repo, branch, resultado="conflict" if "conflict" in str(r.get("erro")) else "failed",
                     extra=str(r.get("erro")))
@@ -295,7 +350,7 @@ def merge_e_push(cfg: Config, repo: str, ws: Path, branch: str, root=None) -> di
         return {"hash": r["hash"], "base": base}
     git(cfg, ["fetch", "-q", "github", base], ws, repo=repo, timeout=120)
     git(cfg, ["checkout", "-q", "-B", f"integra-{base}", f"github/{base}"], ws)
-    r = git(cfg, ["merge", "--no-ff", "-m", f"Merge {branch}", branch], ws, check=False)
+    r = git(cfg, ["merge", "--no-ff", "-m", f"Merge {branch}", commit], ws, check=False)
     if r.returncode != 0:
         git(cfg, ["merge", "--abort"], ws, check=False)
         auditar(cfg, "merge", repo, branch, resultado="conflict")

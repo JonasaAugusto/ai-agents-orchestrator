@@ -1,5 +1,6 @@
 """Unofficial WhatsApp channel, tested only with fakes (no network, no library)."""
 import unittest
+import re
 
 from ai_agents_orchestrator.bot import Bot
 from ai_agents_orchestrator.servico import Servico
@@ -72,7 +73,7 @@ class Canal(unittest.TestCase):
         texto = self.cli.enviadas[-1][1]
         self.assertIn("1. Publish", texto)
         self.assertIn("3. Don't publish", texto)
-        self.cli.chega("2")
+        self.cli.chega(re.search(r"[a-f0-9]{8}:2", texto).group(0))
         u = self.wa.atualizacoes(0, timeout=0)[0]
         self.assertEqual(u["callback_query"]["data"], "a2:mac2")
         self.cli.chega("2")  # options are consumed: a second "2" is plain text
@@ -133,7 +134,7 @@ class ServicoPorWhatsApp(Base):
         self.cli.chega("/pause")
         self.processar_tudo()
         self.assertIn("1. Confirm", self.cli.enviadas[-1][1])
-        self.cli.chega("1")
+        self.cli.chega(re.search(r"[a-f0-9]{8}:1", self.cli.enviadas[-1][1]).group(0))
         self.processar_tudo()
         self.assertTrue(self.estado.get("pausado"))
         self.assertEqual(self.cli.enviadas[-1][1], "Queue paused.")

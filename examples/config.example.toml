@@ -21,6 +21,7 @@ commit_author_email = "agent@localhost"
 # self_repo = "ai-agents-orchestrator"   # name of this project's own repo in [repos], if the agent may edit it
 
 [paths]
+# Parent must be root-controlled. Root-generated mirror/repos use the sibling <state_dir>-root-shared.
 state_dir = "/var/lib/ai-agents-orchestrator"
 root_state_dir = "/var/lib/ai-agents-orchestrator-root"
 claude_transcripts = "/home/youruser/.claude/projects/-home-youruser-yourproject"

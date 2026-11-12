@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, engines
+from . import config, engines, gitseguro
 from .config import CLI, Config
 
 OK, AVISO, FALHA, INFO = "ok", "warn", "FAIL", "info"
@@ -183,9 +183,10 @@ def checar_repos(cfg: Config, amb: Ambiente) -> list[Item]:
     for nome, spec in cfg.repos.items():
         gh = spec.get("github")
         if gh:
-            code, out = amb.rodar(["git", "ls-remote", "--exit-code", f"https://github.com/{gh}.git", "HEAD"],
+            code, out = amb.rodar(["git", "-C", "/", *gitseguro.CONFIAVEL, "ls-remote", "--exit-code", f"https://github.com/{gh}.git", "HEAD"],
                                   env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/root"),
-                                       "GIT_TERMINAL_PROMPT": "0"}, timeout=60)
+                                       "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_SYSTEM": "/dev/null",
+                                       "GIT_CONFIG_GLOBAL": "/root/.gitconfig" if amb.euid() == 0 else "/dev/null"}, timeout=60)
             if code == 0:
                 extra = "" if gh in cfg.push_allowlist else " (not in publish.push_allowlist: the agent cannot push it)"
                 itens.append(Item(f"repo {nome}", OK if not extra else AVISO, f"github {gh} reachable{extra}"))

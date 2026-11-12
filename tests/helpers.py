@@ -59,7 +59,7 @@ class Base(unittest.TestCase):
         self.cfg = config.Config(state_dir=self.dir / "state", root_state=self.dir / "root-state", token=TOKEN, chat_id=CHAT, channel="telegram")
         self.cfg.claude_wakeup = True  # the experimental wake-up is exercised by the tests (default is off)
         self.cfg.preparar_dirs()
-        self.cfg.mirror.mkdir(exist_ok=True)
+        self.cfg.mirror.mkdir(parents=True, exist_ok=True)
         self.cfg.repos = {}
         self.t = [1000.0]
         self.estado = Estado(self.cfg.db_estado)

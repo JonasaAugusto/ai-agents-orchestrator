@@ -13,13 +13,14 @@ Safety measures for the number:
   - session files live in <state_dir>/whatsapp (dir 0700, files 0600), outside any repository.
 
 Buttons are unreliable on unofficial clients, so they are rendered as numbered options ("1 Publish / 2 Review first")
-and a reply with just the number is turned into a button press (`callback_query`), so the bot logic is unchanged.
+and the message-specific action code is turned into a button press (`callback_query`). Bare numbers never approve.
 """
 from __future__ import annotations
 
 import os
 import queue
 import re
+import secrets
 import threading
 import time
 from pathlib import Path
@@ -102,6 +103,9 @@ class WhatsApp(Canal):
         self._fila: queue.Queue = queue.Queue()
         self._seq = int(relogio() * 1000)  # update ids keep growing across restarts (the service persists the offset)
         self._seq_lock = threading.Lock()
+        self._envio_lock = threading.Lock()
+        self._opcoes_lock = threading.Lock()
+        self._token_opcoes = ""
         self._opcoes: list[str] = []  # callback_data of the last numbered options shown
         self._parar = threading.Event()
         self.fatal: str | None = None
@@ -123,16 +127,26 @@ class WhatsApp(Canal):
     def enviar(self, texto: str, botoes: Botoes | None = None, html: bool = False) -> int | None:
         if self.fatal:
             raise WhatsAppErro(f"channel stopped: {self.fatal}")
-        corpo, opcoes = self.renderizar(texto, botoes)
-        blocos = [corpo[i:i + self.max_out] for i in range(0, max(len(corpo), 1), self.max_out)] or [""]
-        for b in blocos:
-            self.limite.esperar()
-            try:
-                self.cliente.send(self.dono, b or "(empty)")  # destination is ALWAYS the owner
-            except Exception as e:  # never propagate library text (could contain identifiers)
-                raise WhatsAppErro(f"send failed ({type(e).__name__})") from None
-        if opcoes:
-            self._opcoes = opcoes
+        # Serialize sends; invalidate before exposing any part of the next message.
+        # Resolution never waits on the transport, which may call us back synchronously.
+        with self._envio_lock:
+            with self._opcoes_lock:
+                self._opcoes = []
+                self._token_opcoes = ""
+            corpo, opcoes = self.renderizar(texto, botoes)
+            token = secrets.token_hex(4) if opcoes else ""
+            if opcoes:
+                corpo = corpo.replace("Reply with a number:", "Reply with the exact action code:")
+                corpo += "\n" + " / ".join(f"{token}:{i}" for i in range(1, len(opcoes) + 1))
+            blocos = [corpo[i:i + self.max_out] for i in range(0, max(len(corpo), 1), self.max_out)] or [""]
+            for b in blocos:
+                self.limite.esperar()
+                try:
+                    self.cliente.send(self.dono, b or "(empty)")
+                except Exception as e:
+                    raise WhatsAppErro(f"send failed ({type(e).__name__})") from None
+            with self._opcoes_lock:
+                self._opcoes, self._token_opcoes = opcoes, token
         return None
 
     # ------------------------------------------------------------ incoming
@@ -152,10 +166,13 @@ class WhatsApp(Canal):
         if not texto:
             return
         uid = self._proximo_id()
-        m = re.fullmatch(r"(\d{1,2})[.)]?", texto)
-        if m and self._opcoes and 1 <= int(m.group(1)) <= len(self._opcoes):
-            data = self._opcoes[int(m.group(1)) - 1]
-            self._opcoes = []  # one answer per set of options (the bot also enforces single use)
+        m = re.fullmatch(r"([a-f0-9]{8}):(\d{1,2})", texto)
+        data = None
+        with self._opcoes_lock:
+            if m and m.group(1) == self._token_opcoes and 1 <= int(m.group(2)) <= len(self._opcoes):
+                data = self._opcoes[int(m.group(2)) - 1]
+                self._opcoes, self._token_opcoes = [], ""
+        if data is not None:
             self._fila.put({"update_id": uid, "callback_query": {
                 "id": f"wa-{uid}", "from": {"id": self.chat_id}, "data": data,
                 "message": {"chat": {"id": self.chat_id}, "message_id": uid}}})

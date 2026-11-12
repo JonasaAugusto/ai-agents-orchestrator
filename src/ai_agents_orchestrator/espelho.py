@@ -1,6 +1,6 @@
 """Mirror (runs as ROOT when the root daemon is used: it is the only part that reads the originals).
 
-Mechanical and on demand (no timers/polling). Delivers to Codex, in <state_dir>/mirror:
+Mechanical and on demand (no timers/polling). Delivers to Codex, in <state_dir>-root-shared/mirror:
   - transcript-cauda.jsonl: ONLY the recent tail of the Claude Code session (last N text messages + API error
     records), without tool output. Codex uses it only to CHECK Claude's BRIEFING.md;
   - memoria/*.md: Claude Code memory files, masked;
@@ -23,7 +23,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import gitseguro, sanitize
+from . import arquivos_root, gitseguro, sanitize
 from .config import Config
 
 USUARIO = "aao"  # replaced by cfg.service_user (see _ids)
@@ -35,7 +35,7 @@ Copy generated for the backup agent. Personal data (e-mails, phone numbers, nati
 other services are masked; development secrets are masked too unless the operator disabled it. If something
 seems missing, it was removed on purpose.
 
-READ FIRST: ../para-codex/BRIEFING.md (and the task briefing in ../para-codex/tarefas/<id>.md).
+READ FIRST: BRIEFING.md in the configured service state_dir/para-codex (and the task briefing there).
 This mirror is for CHECKING the briefing, not for rebuilding the context from scratch.
 
 - transcript-cauda.jsonl: last text messages of the Claude Code session (papel: usuario=user | assistente=assistant | erro=error).
@@ -66,16 +66,7 @@ def _dono(path: Path, uid: int | None, gid: int | None, modo: int | None = None)
 
 
 def _gravar(path: Path, texto: str, gid: int | None, modo: int = 0o640) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(texto, encoding="utf-8")
-    os.chmod(tmp, modo)
-    if gid is not None:
-        try:
-            os.chown(tmp, 0, gid)
-        except OSError:
-            pass
-    os.replace(tmp, path)
+    arquivos_root.gravar(path, texto, gid, modo)
 
 
 def agora_iso(ts: float | None = None) -> str:
@@ -125,7 +116,7 @@ def _sessao_atual(cfg: Config) -> Path | None:
 def _espelhar_memoria(cfg: Config, gid: int | None) -> int:
     n = 0
     destino = cfg.mirror / "memoria"
-    destino.mkdir(parents=True, exist_ok=True)
+    os.close(arquivos_root.abrir_dir(destino, gid))
     vistos = set()
     if cfg.fonte_memoria.is_dir():
         for md in sorted(cfg.fonte_memoria.glob("*.md")):
@@ -264,20 +255,15 @@ def _privado(cfg: Config, nome: str) -> Path:
     """Root's private bare mirror (root_state/mirror, 0700). git only ever runs as root HERE: never in the copy the
     service owns, whose config/hooks the service (and Codex, same uid) could have rewritten."""
     base = cfg.root_state / "mirror"
-    base.mkdir(parents=True, exist_ok=True)
-    os.chmod(cfg.root_state, 0o700)
-    os.chmod(base, 0o700)
+    os.close(arquivos_root.abrir_dir(cfg.root_state, modo=0o700))
+    os.close(arquivos_root.abrir_dir(base, modo=0o700))
     return base / f"{nome}.git"
 
 
 def _abrir_dir_root(caminho: Path, gid: int | None) -> int:
     """Opens the repos dir without following a symlink and makes it root:<group> 0750, so the service cannot add,
     rename or swap entries while root works in it. Returns a directory fd (use /proc/self/fd/<fd>/...)."""
-    caminho.mkdir(parents=True, exist_ok=True)
-    fd = os.open(caminho, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    os.fchown(fd, 0, gid if gid is not None else 0)
-    os.fchmod(fd, 0o750)
-    return fd
+    return arquivos_root.abrir_dir(caminho, gid)
 
 
 def _exportar(priv: Path, fd_pai: int, nome: str, uid: int | None, gid: int | None) -> None:
@@ -311,6 +297,7 @@ def atualizar_repos(cfg: Config, nomes: list[str] | None = None) -> dict:
     uid, gid = _ids(cfg.service_user)
     root = _como_root()
     if root:
+        os.close(arquivos_root.abrir_dir(cfg.shared_state, gid))
         fd = _abrir_dir_root(cfg.repos_dir, gid)
     else:
         cfg.repos_dir.mkdir(parents=True, exist_ok=True)
@@ -340,9 +327,9 @@ def espelhar(cfg: Config, agora: float | None = None, hook_payload: dict | None 
     agora = agora if agora is not None else time.time()
     uid, gid = _ids(cfg.service_user)
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    cfg.mirror.mkdir(parents=True, exist_ok=True)
-    _dono(cfg.mirror, 0, gid, 0o750)
-    lock = open(cfg.state_dir / "espelho.lock", "a")
+    os.close(arquivos_root.abrir_dir(cfg.shared_state, gid))
+    os.close(arquivos_root.abrir_dir(cfg.mirror, gid))
+    lock = os.fdopen(arquivos_root.abrir_append(cfg.shared_state / "private" / "espelho.lock"), "a")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:

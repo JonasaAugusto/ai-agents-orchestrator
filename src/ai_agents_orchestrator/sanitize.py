@@ -127,7 +127,8 @@ def mascarar_obj(obj, dev: bool = True):
     if isinstance(obj, list):
         return [mascarar_obj(x, dev) for x in obj]
     if isinstance(obj, dict):
-        return {k: mascarar_obj(v, dev) for k, v in obj.items()}
+        return {k: OCULTO if re.search(r"(?i)key|token|password|passwd|secret|senha|credential|authorization|cookie", str(k))
+                else mascarar_obj(v, dev) for k, v in obj.items()}
     return obj
 
 

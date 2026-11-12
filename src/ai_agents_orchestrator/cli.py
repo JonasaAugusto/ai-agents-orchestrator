@@ -15,11 +15,11 @@ import time
 from datetime import date
 from pathlib import Path
 
-from . import __version__, config, engines, espelho, historico, regras, root_daemon
+from . import __version__, config, engines, espelho, historico, regras, root_daemon, workspace
 from .bot import Bot
 from .config import CLI
 from .db import Estado, Quadro
-from .servico import Servico, publicar_base
+from .servico import Servico, publicar_base, aprovacao_publicacao
 
 FINAIS = ("em_revisao", "concluida", "bloqueada", "cancelada")
 AVISO_SEM_CANAL = ("Without a chat channel you cannot send prompts to Codex from your phone, receive its notifications, "
@@ -139,29 +139,39 @@ def _publicar(cfg, tid: int, autorizado: bool = False, chave_arq: Path | None = 
         print("refused: publishing from the CLI needs the owner at an interactive terminal (type the task id to "
               "confirm). --approved-by-owner alone is not accepted; tasks from the chat use the [Publish] button.")
         return 2
+    quadro = Quadro(cfg.db_quadro)
+    t = quadro.ver(tid)
+    if not t:
+        print("task not found")
+        quadro.c.close()
+        return 1
+    if t["origem"] != "claude":
+        print("refused: only tasks delegated by Claude are published from the CLI (chat tasks use the Publish button)"); return 2
+    if t["estado"] != "em_revisao" or t.get("publicado"):
+        print(f"refused: task #{tid} is '{t['estado']}' (must be em_revisao and not yet published)"); return 2
     try:
-        digitado = (entrada(f"Publish task #{tid} (merge into the base branch + push)? Type the task id to confirm: ")
+        aprovacao = aprovacao_publicacao(cfg, t)
+    except workspace.GitErro as e:
+        print(str(e))
+        quadro.c.close()
+        return 1
+    try:
+        digitado = (entrada(f"Publish task #{tid}, commit {aprovacao.get('commit', 'unknown')}, "
+                           f"to {aprovacao.get('repo', 'unknown')}/{aprovacao.get('destino', 'unknown')}? "
+                           "Type the task id to confirm: ")
                     or "").strip()
     except EOFError:
         digitado = ""
     if digitado != str(tid):
         print("refused: confirmation did not match the task id")
         return 2
-    quadro = Quadro(cfg.db_quadro)
-    t = quadro.ver(tid)
-    if not t:
-        print("task not found"); return 1
-    if t["origem"] != "claude":
-        print("refused: only tasks delegated by Claude are published from the CLI (chat tasks use the Publish button)"); return 2
-    if t["estado"] != "em_revisao" or t.get("publicado"):
-        print(f"refused: task #{tid} is '{t['estado']}' (must be em_revisao and not yet published)"); return 2
     if root is None:
         try:
             chave = (chave_arq or cfg.publish_key_file).read_text().strip()
         except OSError:
             print("publish key not readable"); return 1
         root = root_daemon.RootClient(str(cfg.root_socket), chave_hex=chave)
-    r = publicar_base(cfg, quadro, root, tid, time.time())
+    r = publicar_base(cfg, quadro, root, tid, time.time(), aprovacao)
     # the service runs as another user: give it back any WAL files root may have created
     try:
         st = os.stat(cfg.db_quadro)

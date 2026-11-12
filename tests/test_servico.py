@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 from pathlib import Path
 
@@ -390,8 +391,9 @@ class Quadro_(Base):
         t = self.quadro.criar("Redesenhar tela", "exige skill", "", "claude", "codex")
         self.assertEqual(self.quadro.recado_pendente()[0]["id"], t["id"])
         txt = self.svc.recado_para_hook()
-        self.assertIn("Redesenhar tela", txt)
-        self.assertIn("HANDOFF-PARA-CLAUDE.md", txt)
+        self.assertNotIn("Redesenhar tela", txt)
+        self.assertIn(f"#{t['id']} state=pending", txt)
+        self.assertIn("untrusted", txt)
         self.svc.claude_assumiu()
         self.assertEqual(self.svc.recado_para_hook(), "")  # lido: nada a injetar
 
@@ -435,7 +437,9 @@ class Publicar(Base):
         self.assertEqual(self.quadro.ver(self.t_["id"])["estado"], "concluida")
         log = sh("git", "--git-dir", str(self.gh), "log", "--oneline", "main")
         self.assertIn("Merge agent/", log)
-        self.assertTrue((self.cfg.logs / "auditoria.jsonl").read_text().count("merge+push") == 1)
+        audit = (self.cfg.shared_state / "private" / "auditoria-workspace.jsonl" if os.geteuid() == 0
+                 else self.cfg.logs / "auditoria.jsonl")
+        self.assertEqual(audit.read_text().count("merge+push"), 1)
         self.assertIn("Deploy to production", [r for r, _ in self.botoes_enviados()])
         self.assertFalse(any(c[0] == "publicar" for c in self.root.chamadas))  # nada em producao ainda
         self.apertar("Deploy to production")
@@ -494,7 +498,9 @@ class Publicar(Base):
         sh("git", "commit", "-qam", "agente", cwd=ws)
         with self.assertRaises(workspace.GitErro):
             workspace.merge_e_push(self.cfg, "web-app", ws, self.quadro.ver(self.t_["id"])["branch"], root=self.root)
-        self.assertIn("conflict", (self.cfg.logs / "auditoria.jsonl").read_text())
+        audit = (self.cfg.shared_state / "private" / "auditoria-workspace.jsonl" if os.geteuid() == 0
+                 else self.cfg.logs / "auditoria.jsonl")
+        self.assertIn("conflict", audit.read_text())
 
 
 if __name__ == "__main__":
