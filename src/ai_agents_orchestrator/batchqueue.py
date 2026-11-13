@@ -64,6 +64,22 @@ def split_command(text: str) -> list[str]:
     return [part[1:-1] if len(part) > 1 and part[0] == part[-1] and part[0] in "\"'" else part for part in shlex.split(text, posix=False)]
 
 
+def pid_alive(pid: int) -> bool:
+    if sys.platform == "win32":  # os.kill(pid, 0) would terminate the process on Windows
+        try:
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            return True
+        return bool(re.search(rf"\b{pid}\b", out))
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 class LimitReached(Exception):
     def __init__(self, until: str | None = None, reason: str = ""):
         super().__init__(reason)
@@ -558,10 +574,9 @@ class Queue:
                 except FileExistsError:
                     pass
                 try:
-                    other = int(self.f_pid.read_text())
-                    if sys.platform != "win32":  # os.kill(pid, 0) would terminate the process on Windows
-                        os.kill(other, 0)
-                    return False
+                    if pid_alive(int(self.f_pid.read_text())):
+                        return False
+                    self.f_pid.unlink(missing_ok=True)  # stale
                 except FileNotFoundError:
                     continue
                 except (OSError, ValueError):
