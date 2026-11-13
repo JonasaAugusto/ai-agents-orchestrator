@@ -33,14 +33,21 @@ elif a[0] == "delegate":
         print(json.dumps({"ok": False, "erro": "CONCURRENT DELEGATE"})); sys.exit(1)
     lot = title.split(":")[0]; fix = "(fix)" in title
     tid = s["next"]; s["next"] += 1
-    branch = "agent/" + lot
+    branch = "agent/" + lot + ("-fix" if fix else "")
     git("checkout", "-q", "-B", branch, "main")
+    import re
+    brief = open(a[a.index("--briefing") + 1]).read()
+    if SCEN != "nomerge":
+        for flag, b in re.findall(r"git merge (--squash|--no-edit) (\S+?)`", brief):
+            git("merge", "-q", flag, b)
+            if flag == "--squash": pass
     msg = "Implement " + lot
     if SCEN == "ai" and lot == "L1" and not fix: msg += "\n\nCo-Authored-By: Some Bot <bot@example.com>"
-    files = {"src_" + lot + ".py": "x = 1\n"}
-    if not (SCEN == "nochangelog" and lot == "L1"): files["CHANGELOG.md"] = "# c\n" + lot + "\n"
+    files = {"src_" + lot + ".py": "x = 2\n" if fix else "x = 1\n"}
+    if not (SCEN == "nochangelog" and lot == "L1"): files[lot + "_CHANGELOG/CHANGELOG.md"] = "# c\n" + lot + ("f" if fix else "") + "\n"
     if SCEN == "secret" and lot == "L1": files[".env"] = "A=1\n"
-    for n, c in files.items(): open(os.path.join(REPO, n), "w").write(c)
+    for n, c in files.items():
+        os.makedirs(os.path.dirname(os.path.join(REPO, n)), exist_ok=True); open(os.path.join(REPO, n), "w").write(c)
     git("add", "-A"); git("commit", "-q", "-m", msg); git("checkout", "-q", "main")
     tests = "12 passed"
     if SCEN == "fail" and lot == "L1": tests = "3 failed, 9 passed"
@@ -209,6 +216,78 @@ class QueueTests(unittest.TestCase):
         self.work = self.work.parent / "work2"
         with self.env("happy"):
             self.assertEqual(self.start()[0], 2)
+
+    def test_fix_and_dependents_build_on_earlier_work(self):
+        with self.env("ai"):
+            self.assertEqual(self.drive(["--forbid-ai-mentions"]), 0)
+        fix = (self.work / "briefings" / "L1-2.md").read_text()
+        self.assertIn("git merge --squash agent/L1", fix)
+        self.assertIn("git merge --no-edit agent/L0", fix)
+        branch = json.loads((self.work / "state.json").read_text())["lots"]["L1"]["phases"]["code"]["branch"]
+        self.assertEqual(branch, "agent/L1-fix")
+        self.assertIn("git merge --no-edit agent/L1-fix", (self.work / "briefings" / "L2-1.md").read_text())
+        contains = subprocess.run(["git", "-C", str(self.repo), "merge-base", "--is-ancestor", "agent/L0", "agent/L2"])
+        self.assertEqual(contains.returncode, 0)
+
+    def test_dependent_that_ignores_earlier_work_is_flagged(self):
+        with self.env("nomerge"):
+            self.start()
+        data = json.loads((self.work / "state.json").read_text())
+        self.assertIn("does not contain the earlier work", data["lots"]["L1"]["phases"]["code"]["failures"][0])
+
+    def test_dependency_cycle_is_rejected_at_start(self):
+        self.lot("L0", depends="L2")
+        with self.env("happy"):
+            rc, out = self.start()
+        self.assertEqual(rc, 2)
+        self.assertIn("cycle", out)
+
+    def test_pending_lots_that_cannot_run_are_not_reported_as_finished(self):
+        with self.env("happy"):
+            self.start()
+            data = json.loads((self.work / "state.json").read_text())
+            data["lots"]["L0"]["state"] = "pending"
+            data["lots"]["L3"]["state"] = "pending"
+            data["ready_since_review"] = 0
+            (self.work / "state.json").write_text(json.dumps(data))
+            q = batchqueue.Queue(self.work, poll=0)
+            q.by_id["L0"]["depends"] = ["L3"]
+            q.by_id["L3"]["depends"] = ["L0"]
+            self.assertEqual(q._loop(), 2)
+        self.assertNotEqual(json.loads((self.work / "state.json").read_text())["pause"]["why"], "finished")
+
+    def test_second_runner_is_refused_atomically(self):
+        with self.env("happy"):
+            self.start()
+            a, b = batchqueue.Queue(self.work, poll=0), batchqueue.Queue(self.work, poll=0)
+            self.assertTrue(a._lock())
+            self.assertFalse(b._lock())
+            a.f_pid.write_text("999999999")  # stale pid is taken over
+            self.assertTrue(b._lock())
+
+    def test_resume_force_ignores_the_limit_everywhere(self):
+        class Limited:
+            def status(self):
+                return {"ok": True, "tarefa_atual": None, "fila": 0, "pausado": False}
+        q = batchqueue.Queue(self.work, cli=Limited(), poll=0)
+        q.state = {"settings": {}}
+        with mock.patch.object(batchqueue.Queue, "active_limit", return_value="01/01 00:00"):
+            with self.assertRaises(batchqueue.LimitReached):
+                q.wait_free([])
+            q.force_limit = True
+            q.wait_free([])
+            q.check_limit()
+
+    def test_failed_status_is_an_error_not_availability(self):
+        class Bad:
+            def status(self):
+                return batchqueue.AaoCli.status(self)
+            def call(self, *a):
+                return {"ok": False, "erro": "daemon down"}
+        q = batchqueue.Queue(self.work, cli=Bad(), poll=0)
+        q.state = {"settings": {}}
+        with self.assertRaises(RuntimeError):
+            q.wait_free([])
 
 
 class CliWiring(unittest.TestCase):

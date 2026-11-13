@@ -110,6 +110,20 @@ def load_lots(folder: Path) -> list[dict[str, Any]]:
         for dep in lot["depends"]:
             if dep not in ids:
                 raise ValueError(f"lot {lot['id']} depends on unknown lot {dep}")
+    graph = {lot["id"]: lot["depends"] for lot in lots}
+    done: set[str] = set()
+
+    def visit(node: str, trail: list[str]) -> None:
+        if node in trail:
+            raise ValueError("dependency cycle: " + " -> ".join([*trail[trail.index(node):], node]))
+        if node in done:
+            return
+        for dep in graph[node]:
+            visit(dep, [*trail, node])
+        done.add(node)
+
+    for lot_id in graph:
+        visit(lot_id, [])
     return lots
 
 
@@ -128,10 +142,15 @@ class AaoCli:
             raise RuntimeError(f"unexpected output from `aao {' '.join(args)}` (rc={proc.returncode}): {out[:200]}") from None
         if not isinstance(data, dict):
             raise RuntimeError(f"unexpected output from `aao {args[0]}`")
+        if proc.returncode != 0 and not data:
+            raise RuntimeError(f"`aao {' '.join(args)}` failed (rc={proc.returncode}) with no answer")
         return data
 
     def status(self) -> dict[str, Any]:
-        return self.call("status")
+        data = self.call("status")
+        if not data or data.get("ok") is False:
+            raise RuntimeError(f"aao status failed: {data.get('erro') or data.get('error') or 'empty answer'}")
+        return data
 
     def show(self, task_id: int) -> dict[str, Any]:
         data = self.call("show", str(task_id))
@@ -157,7 +176,7 @@ class AaoCli:
         return int(data["id"])
 
 
-def git_info(repo_path: str, branch: str, base: str) -> dict[str, Any] | None:
+def git_info(repo_path: str, branch: str, base: str, exclude: list[str] | None = None) -> dict[str, Any] | None:
     """None when the lot has no usable clone; otherwise what the mechanical checks need."""
     if not repo_path or not Path(repo_path).is_dir():
         return None
@@ -169,12 +188,29 @@ def git_info(repo_path: str, branch: str, base: str) -> dict[str, Any] | None:
     rc, _ = git("rev-parse", "--verify", f"refs/heads/{branch}")
     if rc != 0:
         return {"exists": False, "messages": [], "files": [], "added": []}
-    _, log = git("log", f"{base}..{branch}", "--format=%B%x1e")
-    _, names = git("diff", "--name-only", f"{base}...{branch}")
-    _, diff = git("diff", f"{base}...{branch}", "-U0")
+    known = [f"^{b}" for b in exclude or [] if git("rev-parse", "--verify", f"refs/heads/{b}")[0] == 0]
+    _, log = git("log", f"{base}..{branch}", *known, "--format=%B%x1e")
+    if known:  # work merged in from earlier lots was already checked: look only at this task's own commits
+        _, names = git("log", f"{base}..{branch}", *known, "--name-only", "--format=")
+        _, diff = git("log", f"{base}..{branch}", *known, "-p", "-U0", "--format=")
+        names = "\n".join(dict.fromkeys(n for n in names.splitlines() if n))
+    else:
+        _, names = git("diff", "--name-only", f"{base}...{branch}")
+        _, diff = git("diff", f"{base}...{branch}", "-U0")
     return {"exists": True, "messages": [m.strip() for m in log.split("\x1e") if m.strip()],
             "files": [n for n in names.splitlines() if n],
             "added": [x[1:] for x in diff.splitlines() if x.startswith("+") and not x.startswith("+++")]}
+
+
+def git_contains(repo_path: str, ancestor: str, branch: str) -> bool | None:
+    """True when `branch` contains every commit of `ancestor`; None when it cannot be checked."""
+    if not repo_path or not Path(repo_path).is_dir():
+        return None
+    base = ["git", "-C", repo_path]
+    for ref in (ancestor, branch):
+        if subprocess.run([*base, "rev-parse", "--verify", f"refs/heads/{ref}"], capture_output=True, timeout=120).returncode != 0:
+            return None
+    return subprocess.run([*base, "merge-base", "--is-ancestor", ancestor, branch], capture_output=True, timeout=120).returncode == 0
 
 
 # ------------------------------------------------------------------ the queue
@@ -186,6 +222,7 @@ class Queue:
         self.f_stop, self.f_review, self.f_pid = self.dir / "STOP", self.dir / "NEEDS_REVIEW.md", self.dir / "queue.pid"
         self.cli = cli or AaoCli()
         self.state: dict[str, Any] = json.loads(self.f_state.read_text(encoding="utf-8")) if self.f_state.exists() else {}
+        self.force_limit = False
         self.lots: list[dict[str, Any]] = []
         self.by_id: dict[str, dict[str, Any]] = {}
         self.poll = float(os.environ.get("AAO_QUEUE_POLL", "60")) if poll is None else poll
@@ -275,6 +312,8 @@ class Queue:
         return None
 
     def check_limit(self, status: dict[str, Any] | None = None) -> None:
+        if self.force_limit:
+            return
         status = status or self.cli.status()
         until = self.active_limit(status)
         if until:
@@ -297,8 +336,31 @@ class Queue:
             self.log(f"queue busy (current={current}, pending={status.get('fila')}, paused={status.get('pausado')}); waiting")
             self.sleep(self.poll * 5)
 
+    def predecessors(self, lot: dict[str, Any], phase: dict[str, Any]) -> list[str]:
+        """Branches whose work this task must build on: the lots it depends on and, on a fix, the failed attempt."""
+        branches = self.dependency_branches(lot)
+        if phase["attempt"] > 1:
+            branches.append(phase.get("branch"))
+        return [str(b) for b in dict.fromkeys(branches) if b]
+
+    def dependency_branches(self, lot: dict[str, Any]) -> list[Any]:
+        return [self.lot_state(d)["phases"].get("code", {}).get("branch") for d in lot["depends"]]
+
+    @staticmethod
+    def message_fix(phase: dict[str, Any]) -> bool:
+        """A fix for a commit-message failure cannot keep the old commits: it must recreate them with clean messages."""
+        return phase["attempt"] > 1 and any("commit message" in f for f in phase.get("failures") or [])
+
     def briefing(self, lot: dict[str, Any], phase: dict[str, Any]) -> Path:
         text = lot["body"]
+        before = self.predecessors(lot, phase)
+        if before:
+            text += ("\n\n## BASE (mandatory, first step)\nThe workspace starts from the base branch and does not contain earlier work. "
+                     "Before changing anything, bring it in with "
+                     + "; ".join(f"`git merge {'--squash' if self.message_fix(phase) and b == phase.get('branch') else '--no-edit'} {b}`"
+                                 for b in before)
+                     + ". If a merge is impossible, stop and report the work as partial. The result is checked: your branch must contain "
+                     + "these branches" + (" (except the failed attempt, which you squash into new commits with clean messages)" if self.message_fix(phase) else "") + ".\n")
         if phase["attempt"] > 1 and phase.get("failures"):
             text += (f"\n\n## FIX (second and last attempt)\nThe previous task on branch `{phase.get('branch')}` failed mechanical checks:\n"
                      + "\n".join(f"- {f}" for f in phase["failures"])
@@ -331,7 +393,7 @@ class Queue:
             self.sleep(self.poll)
 
     # --- mechanical checks
-    def verify(self, lot: dict[str, Any], task: dict[str, Any]) -> list[str]:
+    def verify(self, lot: dict[str, Any], task: dict[str, Any], phase: dict[str, Any] | None = None) -> list[str]:
         cfg = self.state["settings"]
         problems: list[str] = []
         if task.get("estado") not in OK_TASK:
@@ -345,7 +407,7 @@ class Queue:
         if not branch:
             problems.append("task has no branch")
             return problems
-        info = git_info(lot["repo_path"], str(branch), cfg.get("base", "main"))
+        info = git_info(lot["repo_path"], str(branch), cfg.get("base", "main"), [str(b) for b in self.dependency_branches(lot) if b])
         files: list[str] = list(task.get("alterados") or [])
         added: list[str] = []
         if info is None:
@@ -356,6 +418,12 @@ class Queue:
                 return problems
             if not info["messages"]:
                 problems.append("branch has no new commits over the base")
+            required = self.dependency_branches(lot) if phase and self.message_fix(phase) else (self.predecessors(lot, phase) if phase else [])
+            for earlier in required:
+                if not earlier:
+                    continue
+                if git_contains(lot["repo_path"], earlier, str(branch)) is False:
+                    problems.append(f"branch {branch!r} does not contain the earlier work from {earlier!r}")
             if cfg.get("forbid_ai_mentions"):
                 extra = [re.compile(p, re.I) for p in cfg.get("extra_forbidden", [])]
                 for message in info["messages"]:
@@ -405,7 +473,7 @@ class Queue:
                 phase["task_id"] = None  # requeue after the limit without spending the attempt
                 self.save()
                 raise LimitReached(_when(str(task.get("erro") or "")), f"task #{task_id} blocked by the usage limit")
-            problems = self.verify(lot, task)
+            problems = self.verify(lot, task, phase)
             phase.update(verified=True, branch=task.get("branch"), failures=problems)
             if not problems:
                 phase["result"] = "ok"
@@ -462,19 +530,38 @@ class Queue:
 
     # --- main loop
     def run(self) -> int:
-        if self.f_pid.exists() and sys.platform != "win32":  # os.kill(pid, 0) would terminate the process on Windows
-            try:
-                os.kill(int(self.f_pid.read_text()), 0)
-                print("another queue is already running (queue.pid)")
-                return 1
-            except (OSError, ValueError):
-                pass
-        self.f_pid.write_text(str(os.getpid()))
+        if not self._lock():
+            print("another queue is already running (queue.pid)")
+            return 1
         self.f_stop.unlink(missing_ok=True)
         try:
             return self._loop()
         finally:
             self.f_pid.unlink(missing_ok=True)
+
+    def _lock(self) -> bool:
+        """Atomic: the pid file is written whole to a private name and hard-linked into place, which fails if it exists."""
+        mine = self.dir / f"queue.pid.{os.getpid()}"
+        mine.write_text(str(os.getpid()))
+        try:
+            for _ in range(3):
+                try:
+                    os.link(mine, self.f_pid)
+                    return True
+                except FileExistsError:
+                    pass
+                try:
+                    other = int(self.f_pid.read_text())
+                    if sys.platform != "win32":  # os.kill(pid, 0) would terminate the process on Windows
+                        os.kill(other, 0)
+                    return False
+                except FileNotFoundError:
+                    continue
+                except (OSError, ValueError):
+                    self.f_pid.unlink(missing_ok=True)  # stale
+            return False
+        finally:
+            mine.unlink(missing_ok=True)
 
     def _loop(self) -> int:
         every = int(self.state["settings"].get("pause_every", 3))
@@ -491,6 +578,9 @@ class Queue:
                     return 0
                 lot_id = self.pick()
                 if lot_id is None:
+                    stuck = [lot["id"] for lot in self.lots if self.lot_state(lot["id"])["state"] not in DONE + DEAD]
+                    if stuck:
+                        raise RuntimeError("no lot can run but these are still pending: " + ", ".join(stuck))
                     break
                 self.run_lot(self.by_id[lot_id])
             self.write_review("queue finished")
@@ -613,6 +703,7 @@ def run(args: argparse.Namespace, cli: Any = None) -> int:
             print(f"usage limit still active until {stop.until}; use --force to try anyway")
             return 3
     pause = q.state.get("pause") or {}
+    q.force_limit = bool(args.force)
     q.state["limit"] = None
     if pause.get("why") == "review":
         q.state["ready_since_review"] = 0
