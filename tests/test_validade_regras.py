@@ -31,7 +31,6 @@ class ValidadeConsistencia(unittest.TestCase):
                         self.assertIn("2026-12-09", str(avisos[0].message))
 
     @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
-    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_vencimento_nao_oculta_outros_erros(self):
         with tempfile.TemporaryDirectory() as tmp:
             for extra, erro in (("rule\n" * 61, "more than 60 lines"),

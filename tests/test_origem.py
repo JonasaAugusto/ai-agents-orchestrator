@@ -7,7 +7,7 @@ from unittest import mock
 
 from ai_agents_orchestrator import cli
 from ai_agents_orchestrator.db import Quadro
-from tests.helpers import Base, sh
+from tests.helpers import Base, sh, needs_root
 from tests.test_servico import escreve_arquivo
 
 
@@ -150,6 +150,7 @@ class PublicarPelaCli(Base):
         self.assertEqual(rc, 2)
         self.assertEqual(self.root.chamadas and [c for c in self.root.chamadas if c[0] == "push_base"], [])
 
+    @needs_root
     def test_publica_main_no_ff_pelo_daemon_e_marca_concluida(self):
         rc, _ = self.pub()
         self.assertEqual(rc, 0)

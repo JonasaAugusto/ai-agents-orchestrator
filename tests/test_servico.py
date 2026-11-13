@@ -7,7 +7,7 @@ from ai_agents_orchestrator import workspace
 from ai_agents_orchestrator.db import padroes_colidem
 from ai_agents_orchestrator.engines import LimiteInfo, Resultado
 from ai_agents_orchestrator.servico import extrair_json
-from tests.helpers import Base, sh
+from tests.helpers import Base, sh, needs_root
 
 
 def contexto(limite="sim", tarefas=None, reset=1000 + 3600):
@@ -429,6 +429,7 @@ class Publicar(Base):
         self.t_ = self.quadro.criar("Muda coisa", "", "web-app")
         self.svc.ciclo_worker()
 
+    @needs_root
     def test_publicar_exige_botao_merge_push_e_producao_so_depois(self):
         self.assertEqual(sh("git", "--git-dir", str(self.gh), "log", "--oneline", "main").count("\n"), 1)  # nada publicado
         self.apertar("Publish")
@@ -467,6 +468,7 @@ class Publicar(Base):
         self.apertar("Don't publish")
         self.assertEqual(self.quadro.ver(self.t_["id"])["estado"], "em_revisao")
 
+    @needs_root
     def test_push_de_branch_vai_pelo_daemon_root_e_modo_deploy_key_fica_desativado(self):
         ws = Path(self.quadro.ver(self.t_["id"])["workspace"])
         br = self.quadro.ver(self.t_["id"])["branch"]
@@ -492,6 +494,7 @@ class Publicar(Base):
         with self.assertRaises(workspace.GitErro):
             workspace.preparar_workspace(self.cfg, "other-repo", 99, "x")
 
+    @needs_root
     def test_push_nao_fast_forward_e_recusado_e_auditado(self):
         # alguem avanca a main remota: o merge refaz a base a partir do remoto, entao integra; o conflito vira erro
         ws = Path(self.quadro.ver(self.t_["id"])["workspace"])

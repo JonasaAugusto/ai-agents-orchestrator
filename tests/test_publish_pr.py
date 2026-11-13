@@ -7,7 +7,7 @@ from unittest import mock
 from unittest.mock import patch
 
 from ai_agents_orchestrator import cli, compat
-from tests.helpers import Base, sh
+from tests.helpers import Base, sh, needs_root
 from tests import test_lite
 from tests.test_servico import escreve_arquivo
 
@@ -185,6 +185,7 @@ class PrCompleto(Base):
                                entrada=lambda _p: str(self.tid))
         return rc, out.getvalue()
 
+    @needs_root
     def test_full_mode_pushes_branch_only(self):
         branch = self.quadro.ver(self.tid)["branch"]
         before = sh("git", "--git-dir", str(self.remoto), "rev-parse", "main")

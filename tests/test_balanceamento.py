@@ -13,7 +13,7 @@ from unittest import mock
 
 from ai_agents_orchestrator import cli, config, doctor, engines, espelho, root_daemon
 from ai_agents_orchestrator.db import Estado
-from tests.helpers import Base
+from tests.helpers import Base, needs_root
 from tests.test_engines import fake_runner
 from tests.test_retomada import ClaudeFalso
 
@@ -262,6 +262,7 @@ class Balanceamento(Base):
         self.assertEqual(len(rows), 1)
         self.assertEqual((rows[0]['tokens_in'], rows[0]['tokens_out']), (100, 20))
 
+    @needs_root
     def test_root_stop_so_espelha_sessao_sem_repos_memoria_ou_conversa_na_resposta(self):
         self.cfg.fonte_transcripts = self.dir / 'transcripts'
         self.cfg.fonte_transcripts.mkdir()

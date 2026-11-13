@@ -9,7 +9,7 @@ from unittest import mock
 from ai_agents_orchestrator import cli, config, engines, espelho, garantias, prompts, workspace
 from ai_agents_orchestrator.config import Config
 from ai_agents_orchestrator.engines import Resultado
-from tests.helpers import Base, sh
+from tests.helpers import Base, sh, needs_root
 
 REL_OK = "Estado: concluida\nFeito: x. Testes: ok. Falta: nada. Para o Claude: nada. Riscos: nenhum."
 
@@ -101,6 +101,7 @@ class Sincronizacao(Base):
         self.assertEqual(self.quadro.ver(t["id"])["estado"], "bloqueada")
         self.assertEqual(len(self.codex.chamadas), n)
 
+    @needs_root
     def test_espelho_registra_sha_e_origem(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- `aao serve` (lite): when the local socket cannot start, the service threads are now joined before the shared SQLite connection is closed. Before, the process could end with a segmentation fault (exit 139) instead of exit 1.
+- The socket error now carries the real cause (for example `AF_UNIX path too long`) instead of a generic hint.
+- README and docs: the quickstart anchor no longer carries a version, so the links stop breaking at every release. A test now checks every relative link and anchor in the Markdown files.
+- `aao setup --non-interactive` no longer fails in an environment without `USER`/`LOGNAME`; the matching test passes under `env -i`.
+- `aao queue`: the limit time printed by `aao status` (`YYYY-MM-DD HH:MM`) is understood, so "back at" shows the real time instead of "unknown".
+- `aao queue`: a transient failure of `aao status`/`aao show` (restart of the service, timeout) is retried three times with a growing pause before the queue pauses with a clear error; a timeout no longer ends in a traceback.
+- `aao queue`: a missing base branch is refused at `start` with its name, and a failing `git log`/`git diff` is an error instead of an empty answer, so a lot is no longer failed (and its two attempts spent) because of a base that does not exist locally.
+- `aao doctor` names the installed package version instead of a fixed `1.1.0`.
+
+### Added
+- CI: a job under an empty environment (`env -i`) on Ubuntu and Windows, a job that runs `pipx install git+URL@SHA` on Linux, macOS and Windows, a docs-versus-parser test (every documented `aao` subcommand exists and answers `--help`; every `AAO_*` variable is documented), a generic private-path check, and a release check that tag, `pyproject.toml`, `__init__.py`, `plugin.json` and CHANGELOG name the same version (`scripts/check_release.py`, `scripts/check_private_paths.py`).
+- Release notes are taken from the CHANGELOG section instead of being generated.
+- Documented `publish.push_url_scheme` and the `AAO_*` variables that were missing (`AAO_MODE`, `AAO_SOCKET`, `AAO_PATHS_SOCKET`, `AAO_PATHS_CLAUDE_MEMORY`, `AAO_CLAUDE_PROBE_MINUTES`, `AAO_TELEGRAM_CHAT_ID`, `AAO_ENV_FILE`, `AAO_DEV_TREE`, `AAO_INSTALLED`, `AAO_QUEUE_*`), in English and Portuguese.
+
+### Changed
+- Tests that need root and a root-owned temp directory are skipped with a clear reason for other users instead of erroring; duplicated `skipIf` decorators removed.
+
+### Not done in this release
+Known and left for later: Windows `pid_alive` matching in `tasklist` output; `os.link` fallback for the queue lock on exFAT/OneDrive folders; `aao queue status/log/stop` error handling when the lots folder moved; stricter test-report heuristics in `aao queue`; `aao setup --non-interactive` writing a lite configuration; tags for 1.1.0, 1.2.0 and 1.2.1, which were never created; repository topics and English description; a comment in `pyproject.toml` on which modules are portable; a warning in `aao doctor` for socket paths longer than 100 bytes.
+
 ## [1.5.0] - 2026-11-13
 
 ### Added

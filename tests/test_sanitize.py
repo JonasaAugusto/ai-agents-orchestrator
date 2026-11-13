@@ -2,6 +2,7 @@ import json
 import tempfile
 import sys
 import unittest
+from tests.helpers import needs_root
 from pathlib import Path
 
 from ai_agents_orchestrator import sanitize, espelho
@@ -150,7 +151,7 @@ class Cauda(unittest.TestCase):
         self.assertLess(len(json.dumps(c)), 5000)  # nada de 5000 chars de comando
 
     @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
-    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
+    @needs_root
     def test_espelhar_grava_cauda_memoria_hook_e_leiame(self):
         src = self.d / "proj"
         (src / "memory").mkdir(parents=True)
