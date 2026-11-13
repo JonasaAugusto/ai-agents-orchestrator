@@ -28,3 +28,10 @@ when tasks get done; paying extra per task is not.
   isolated tasks for the same kind of work.
 - At about 70% of one engine's weekly quota, with the other lower, hand work to the other engine before the first runs
   out (`balance.alert_high_pct = 70` raises the channel alert there).
+
+## Long streams of lots
+
+- Waiting is the expensive part. Do not keep an agent waiting on a long Codex task: use `aao queue` (a script, zero
+  tokens while it waits) and spend agent tokens only on review at its pause points.
+- Use a companion agent (`companion-agent.md`) only when each lot's result changes the next decision; keep its briefing
+  short and let it stop at the first usage limit.

@@ -81,6 +81,7 @@ files = [
     "src/ai_agents_orchestrator/doctor.py",
     "src/ai_agents_orchestrator/mcp.py",
     "scripts/clean_install_test.py",
+    "src/ai_agents_orchestrator/batchqueue.py",
     "examples/offline_relay.py",
 ]
 follow_imports = "silent"
