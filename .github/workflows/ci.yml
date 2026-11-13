@@ -124,11 +124,12 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/h/Local" "$RUNNER_TEMP/h/Roaming"
           if [ "$RUNNER_OS" = "Windows" ]; then
+            # (tests.test_windows starts PowerShell, which is too slow to cold-start without its own variables; it runs in `lite`.)
             # Windows itself always provides these; the point is to drop everything else (tokens, CI markers, locale, TZ).
             env -i SYSTEMROOT="$SYSTEMROOT" WINDIR="$WINDIR" COMSPEC="$COMSPEC" PATHEXT="$PATHEXT" PATH="$PATH" \
               TEMP="$RUNNER_TEMP" TMP="$RUNNER_TEMP" USERNAME="$USERNAME" USERPROFILE="$RUNNER_TEMP\\h" \
               LOCALAPPDATA="$RUNNER_TEMP\\h\\Local" APPDATA="$RUNNER_TEMP\\h\\Roaming" HOME="$RUNNER_TEMP/h" PYTHONUTF8=1 \
-              python -W ignore -m unittest tests.test_clean_install tests.test_lite tests.test_windows tests.test_batchqueue tests.test_docs
+              python -W ignore -m unittest tests.test_clean_install tests.test_lite tests.test_batchqueue tests.test_docs
           else
             env -i PATH="$PATH" HOME="$RUNNER_TEMP/h" TMPDIR="$RUNNER_TEMP" PYTHONUTF8=1 \
               python -W ignore -m unittest tests.test_clean_install tests.test_lite tests.test_windows tests.test_batchqueue tests.test_docs
