@@ -152,8 +152,21 @@ def load_lots(folder: Path) -> list[dict[str, Any]]:
 
 # ------------------------------------------------------------------ aao and git
 class AaoCli:
+    attempts = 3  # a restart of `aao serve` or a slow answer must not end a queue that polls for hours
+    retry_delay = 5.0
+
     def __init__(self) -> None:
         self.cmd = split_command(os.environ.get("AAO_QUEUE_CLI", "aao"))
+
+    def retrying(self, what: str, fn: Any) -> Any:
+        """Run `fn`, retrying transient failures with a growing pause; the clear error comes only after the last try."""
+        for attempt in range(1, self.attempts + 1):
+            try:
+                return fn()
+            except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+                if attempt == self.attempts:
+                    raise RuntimeError(f"{what} failed after {attempt} attempts: {error}") from error
+                time.sleep(self.retry_delay * attempt)
 
     def call(self, *args: str) -> dict[str, Any]:
         proc = subprocess.run([*self.cmd, *args], capture_output=True, text=True, timeout=120)
@@ -170,12 +183,18 @@ class AaoCli:
         return data
 
     def status(self) -> dict[str, Any]:
+        return self.retrying("`aao status`", self._status)
+
+    def _status(self) -> dict[str, Any]:
         data = self.call("status")
         if not data or data.get("ok") is False:
             raise RuntimeError(f"aao status failed: {data.get('erro') or data.get('error') or 'empty answer'}")
         return data
 
     def show(self, task_id: int) -> dict[str, Any]:
+        return self.retrying(f"`aao show {task_id}`", lambda: self._show(task_id))
+
+    def _show(self, task_id: int) -> dict[str, Any]:
         data = self.call("show", str(task_id))
         if not data.get("ok", True):
             raise RuntimeError(f"aao show {task_id}: {data.get('erro') or data.get('error')}")
@@ -211,15 +230,24 @@ def git_info(repo_path: str, branch: str, base: str, exclude: list[str] | None =
     rc, _ = git("rev-parse", "--verify", f"refs/heads/{branch}")
     if rc != 0:
         return {"exists": False, "messages": [], "files": [], "added": []}
+    if git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}")[0] != 0:
+        raise RuntimeError(f"base {base!r} does not exist in {repo_path}; create it or pass --base with an existing ref")
+
+    def must(*args: str) -> str:
+        rc, out = git(*args)
+        if rc != 0:  # an empty answer from a failed git call would read as "no commits" and fail the lot unfairly
+            raise RuntimeError(f"`git {' '.join(args[:2])}` failed in {repo_path} (rc={rc})")
+        return out
+
     known = [f"^{b}" for b in exclude or [] if git("rev-parse", "--verify", f"refs/heads/{b}")[0] == 0]
-    _, log = git("log", f"{base}..{branch}", *known, "--format=%B%x1e")
+    log = must("log", f"{base}..{branch}", *known, "--format=%B%x1e")
     if known:  # work merged in from earlier lots was already checked: look only at this task's own commits
-        _, names = git("log", f"{base}..{branch}", *known, "--name-only", "--format=")
-        _, diff = git("log", f"{base}..{branch}", *known, "-p", "-U0", "--format=")
+        names = must("log", f"{base}..{branch}", *known, "--name-only", "--format=")
+        diff = must("log", f"{base}..{branch}", *known, "-p", "-U0", "--format=")
         names = "\n".join(dict.fromkeys(n for n in names.splitlines() if n))
     else:
-        _, names = git("diff", "--name-only", f"{base}...{branch}")
-        _, diff = git("diff", f"{base}...{branch}", "-U0")
+        names = must("diff", "--name-only", f"{base}...{branch}")
+        diff = must("diff", f"{base}...{branch}", "-U0")
     return {"exists": True, "messages": [m.strip() for m in log.split("\x1e") if m.strip()],
             "files": [n for n in names.splitlines() if n],
             "added": [x[1:] for x in diff.splitlines() if x.startswith("+") and not x.startswith("+++")]}
@@ -285,6 +313,13 @@ class Queue:
         self.state = {"created": stamp(), "updated": stamp(), "lots_dir": str(lots_dir.resolve()), "settings": settings,
                       "pause": None, "limit": None, "ready_since_review": 0, "lots": {}}
         self._load_lots()
+        for repo_path in dict.fromkeys(lot["repo_path"] for lot in self.lots if lot["repo_path"]):
+            if Path(repo_path).is_dir():
+                rc = subprocess.run(["git", "-C", repo_path, "rev-parse", "--verify", "--quiet", f"{settings.get('base', 'main')}^{{commit}}"],
+                                    capture_output=True, timeout=120).returncode
+                if rc != 0:
+                    self.state = {}
+                    raise ValueError(f"base {settings.get('base', 'main')!r} does not exist in {repo_path}; create it or pass --base")
         self.save()
 
     def lot_state(self, lot_id: str) -> dict[str, Any]:
@@ -310,6 +345,13 @@ class Queue:
     # --- usage limit
     @staticmethod
     def parse_when(text: str) -> datetime | None:
+        iso = re.search(r"(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})", text or "")  # what `aao status` prints
+        if iso:
+            try:
+                year, month, day, hour, minute = (int(x) for x in iso.groups())
+                return datetime(year, month, day, hour, minute, tzinfo=now().tzinfo)
+            except ValueError:
+                return None
         m = re.search(r"(\d{2})/(\d{2})\s+(\d{2}):(\d{2})", text or "")
         if not m:
             return None
@@ -623,7 +665,7 @@ class Queue:
             self.save()
             self.f_stop.unlink(missing_ok=True)
             return 0
-        except RuntimeError as error:
+        except (RuntimeError, OSError, subprocess.SubprocessError) as error:
             self.log(f"ERROR: {error}")
             self.state["pause"] = {"why": f"error: {error}", "at": stamp()}
             self.save()
@@ -631,7 +673,7 @@ class Queue:
 
 
 def _when(text: str) -> str | None:
-    m = re.search(r"\d{2}/\d{2}\s+\d{2}:\d{2}", text or "")
+    m = re.search(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}|\d{2}/\d{2}\s+\d{2}:\d{2}", text or "")
     return m.group(0) if m else None
 
 
