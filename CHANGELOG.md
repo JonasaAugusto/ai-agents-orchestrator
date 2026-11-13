@@ -13,6 +13,7 @@ All notable changes to this project are documented here. The format follows
 - `aao queue`: the limit time printed by `aao status` (`YYYY-MM-DD HH:MM`) is understood, so "back at" shows the real time instead of "unknown".
 - `aao queue`: a transient failure of `aao status`/`aao show` (restart of the service, timeout) is retried three times with a growing pause before the queue pauses with a clear error; a timeout no longer ends in a traceback.
 - `aao queue`: a missing base branch is refused at `start` with its name, and a failing `git log`/`git diff` is an error instead of an empty answer, so a lot is no longer failed (and its two attempts spent) because of a base that does not exist locally.
+- `aao setup --non-interactive` writes a lite configuration outside Linux (full mode does not exist there).
 - `aao doctor` names the installed package version instead of a fixed `1.1.0`.
 
 ### Added
@@ -24,7 +25,7 @@ All notable changes to this project are documented here. The format follows
 - Tests that need root and a root-owned temp directory are skipped with a clear reason for other users instead of erroring; duplicated `skipIf` decorators removed.
 
 ### Not done in this release
-Known and left for later: Windows `pid_alive` matching in `tasklist` output; `os.link` fallback for the queue lock on exFAT/OneDrive folders; `aao queue status/log/stop` error handling when the lots folder moved; stricter test-report heuristics in `aao queue`; `aao setup --non-interactive` writing a lite configuration; tags for 1.1.0, 1.2.0 and 1.2.1, which were never created; repository topics and English description; a comment in `pyproject.toml` on which modules are portable; a warning in `aao doctor` for socket paths longer than 100 bytes.
+Known and left for later: Windows `pid_alive` matching in `tasklist` output; `os.link` fallback for the queue lock on exFAT/OneDrive folders; `aao queue status/log/stop` error handling when the lots folder moved; stricter test-report heuristics in `aao queue`; tags for 1.1.0, 1.2.0 and 1.2.1, which were never created; repository topics and English description; a comment in `pyproject.toml` on which modules are portable; a warning in `aao doctor` for socket paths longer than 100 bytes.
 
 ## [1.5.0] - 2026-11-13
 
