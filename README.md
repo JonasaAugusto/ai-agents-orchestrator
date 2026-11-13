@@ -47,7 +47,7 @@ Or run `uv tool install git+https://github.com/JonasaAugusto/ai-agents-orchestra
 On Linux/macOS you can chain them: `pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator && aao setup`.
 On Windows PowerShell 5.1 or cmd, use the separate commands above (PowerShell 5.1 has no `&&`).
 
-The package is not on PyPI yet (the release workflow is ready and stays off until the PyPI project exists). Ensure pipx's or uv's tool bin directory is on PATH.
+The package is on PyPI: `pipx install ai-agents-orchestrator` (or `uv tool install ai-agents-orchestrator`) installs the latest release; the GitHub URL above installs the unreleased `main`. Ensure pipx's or uv's tool bin directory is on PATH.
 Choose **lite** in the wizard, choose the coordinator (`claude` or `codex`), and register
 the GitHub repositories or local checkouts you want to use. Select the Claude project's
 transcript directory to keep mirrored context scoped to that project. Setup detects both CLIs,
@@ -373,7 +373,7 @@ Linux with systemd, Python 3.11+, git, the [Codex CLI](https://github.com/openai
 git clone https://github.com/JonasaAugusto/ai-agents-orchestrator && cd ai-agents-orchestrator   # rules/, examples/ and templates/ used below
 sudo useradd --system --home-dir /var/lib/ai-agents-orchestrator --create-home --shell /usr/sbin/nologin aao
 sudo python3 -m venv /opt/ai-agents-orchestrator
-sudo /opt/ai-agents-orchestrator/bin/pip install .   # from the clone; not on PyPI yet
+sudo /opt/ai-agents-orchestrator/bin/pip install .   # from the clone (or `pip install ai-agents-orchestrator`)
 sudo ln -s /opt/ai-agents-orchestrator/bin/aao /usr/local/bin/aao
 # optional, unofficial WhatsApp channel:  sudo /opt/ai-agents-orchestrator/bin/pip install '.[whatsapp]'
 ```

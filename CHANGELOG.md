@@ -5,6 +5,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- README (EN and pt-BR): install from PyPI with `pipx install ai-agents-orchestrator`; the package is published since 1.5.1.
+
 ## [1.5.1] - 2026-11-13
 
 ### Fixed

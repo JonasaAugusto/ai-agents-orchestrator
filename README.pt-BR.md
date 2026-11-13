@@ -39,7 +39,7 @@ Alternativa: `uv tool install git+https://github.com/JonasaAugusto/ai-agents-orc
 No Linux/macOS, dá para encadear: `pipx install git+https://github.com/JonasaAugusto/ai-agents-orchestrator && aao setup`.
 No PowerShell 5.1 ou cmd, use os comandos separados acima (PowerShell 5.1 não aceita `&&`).
 
-O pacote ainda não está no PyPI (o workflow de publicação já está pronto e fica desligado até o projeto existir no PyPI). O diretório de ferramentas do pipx ou uv precisa
+O pacote está no PyPI: `pipx install ai-agents-orchestrator` (ou `uv tool install ai-agents-orchestrator`) instala a última versão publicada; a URL do GitHub acima instala a `main`, ainda sem release. O diretório de ferramentas do pipx ou uv precisa
 estar no PATH. Escolha **lite**, o coordenador (`claude` ou `codex`) e os repositórios
 GitHub ou clones locais. O setup detecta os dois CLIs, verifica login com
 `codex login status` e `claude auth status` e instala o plugin pelos comandos oficiais
@@ -342,7 +342,7 @@ O daemon root, a separação de privilégios e o botão Publicar remoto continua
 git clone https://github.com/JonasaAugusto/ai-agents-orchestrator && cd ai-agents-orchestrator   # rules/, examples/ e templates/ usados abaixo
 sudo useradd --system --home-dir /var/lib/ai-agents-orchestrator --create-home --shell /usr/sbin/nologin aao
 sudo python3 -m venv /opt/ai-agents-orchestrator
-sudo /opt/ai-agents-orchestrator/bin/pip install .   # do clone; ainda não está no PyPI
+sudo /opt/ai-agents-orchestrator/bin/pip install .   # do clone (ou `pip install ai-agents-orchestrator`)
 sudo ln -s /opt/ai-agents-orchestrator/bin/aao /usr/local/bin/aao
 sudo aao setup      # assistente: canal de chat (Telegram / nenhum; WhatsApp é extra não oficial), repositórios, segredos em arquivo 0600
 ```
