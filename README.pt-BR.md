@@ -23,7 +23,7 @@ Este arquivo é a versão em português do [README em inglês](README.md), seç�
 Comece pelo [Início rápido](#início-rápido-modo-leve-121) logo abaixo ou pelos [Primeiros 10 minutos](docs/first-10-minutes.md), com saída capturada sem credenciais. Vários lotes em sequência: [agente acompanhante vs. script de fila](docs/companion-vs-queue.pt-BR.md).
 Veja também [contribuição](CONTRIBUTING.md), [conduta](CODE_OF_CONDUCT.md) e [segurança](SECURITY.md).
 
-## Início rápido: modo leve (1.4.0)
+## Início rápido: modo leve (1.5.0)
 
 No Linux, macOS ou Windows, com Python 3.11+, Git 2.38+, Codex CLI e Claude Code instalados,
 execute como seu usuário normal:

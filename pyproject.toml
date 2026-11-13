@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-agents-orchestrator"
-version = "1.4.0"
+version = "1.5.0"
 description = "Run Claude Code and OpenAI Codex CLI as a relay team on your own subscriptions: task board, chat approvals, cross-review and automatic handoff on usage limits."
 readme = "README.md"
 license = "MIT"

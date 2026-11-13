@@ -22,7 +22,7 @@ then `python -m pip install .` (run each command on its own line; PowerShell 5.1
 Captured from the development checkout on Linux/Python 3.14, 2026-11-12:
 
 ```text
-1.4.0
+1.5.0
 ```
 
 The checkout may contain unreleased changes. For a published release use the release selector on GitHub; compare

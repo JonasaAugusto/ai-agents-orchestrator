@@ -31,7 +31,7 @@ Start with the [Quickstart](#quickstart-lite-mode-121) just below, or [First 10 
 See [honest comparison](docs/comparison.md), [version and support policy](docs/support-policy.md),
 [contributing](CONTRIBUTING.md), [conduct](CODE_OF_CONDUCT.md) and [security reports](SECURITY.md).
 
-## Quickstart: lite mode (1.4.0)
+## Quickstart: lite mode (1.5.0)
 
 On Linux, macOS or Windows, with Python 3.11+, Git 2.38+, Codex CLI and Claude Code installed,
 run this as your normal user:
