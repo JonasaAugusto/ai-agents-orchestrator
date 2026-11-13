@@ -20,7 +20,7 @@ publicado sem a sua aprovação explícita.
 
 Este arquivo é a versão em português do [README em inglês](README.md), seção por seção; se algo divergir, o inglês vale. Os apelidos de comandos e flags em português são só de compatibilidade.
 
-Comece pelo [Início rápido](#início-rápido-modo-leve-121) logo abaixo ou pelos [Primeiros 10 minutos](docs/first-10-minutes.md), com saída capturada sem credenciais.
+Comece pelo [Início rápido](#início-rápido-modo-leve-121) logo abaixo ou pelos [Primeiros 10 minutos](docs/first-10-minutes.md), com saída capturada sem credenciais. Vários lotes em sequência: [agente acompanhante vs. script de fila](docs/companion-vs-queue.pt-BR.md).
 Veja também [contribuição](CONTRIBUTING.md), [conduta](CODE_OF_CONDUCT.md) e [segurança](SECURITY.md).
 
 ## Início rápido: modo leve (1.4.0)
@@ -599,6 +599,7 @@ Use `aao --config CAMINHO <comando>` para escolher uma configuração explicitam
 | `delegate --repo R --title T [--files a,b] [--briefing ARQ \| --briefing-text TXT] [--description D] [--priority N]` | enfileira uma tarefa para o Codex |
 | `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID [--short\|--full]`, `cancel ID`, `claim ID [--owner] [--files]` | quadro; `list` aceita `review`/`running` e devolve rótulos de estado em inglês; `result` é curto por padrão |
 | `wait ID [--timeout S]` | bloqueia até um estado final (saída 0 revisão/concluída, 1 bloqueada/cancelada, 2 tempo esgotado) |
+| `queue start PASTA_LOTES` / `resume` / `status` / `stop` / `log` / `reviewed ID...` | modo script: roda lotes em Markdown pelo Codex um por vez com verificações mecânicas, pausa para revisão e nos limites de uso (sem tokens na espera); veja [acompanhante vs. fila](docs/companion-vs-queue.pt-BR.md) |
 | `review --repo R --branch B` | revisão cruzada pelo Codex (somente leitura) |
 | `publish ID` | aprovação humana interativa; leve: o usuário normal digita o ID e o SHA completo; completo: o root digita o ID de uma tarefa delegada pelo Claude |
 | `watch [ID] [--no-follow]`, `watch-open [ID]` | visão ao vivo |

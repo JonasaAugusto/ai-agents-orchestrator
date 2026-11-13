@@ -95,7 +95,7 @@ jobs:
       - run: mypy
       # Windows-only branches (ctypes, msvcrt, no AF_UNIX) are only visible when type-checking for that platform.
       - name: mypy for Windows (portable modules)
-        run: mypy --platform win32 src/ai_agents_orchestrator/lite.py src/ai_agents_orchestrator/ipc.py src/ai_agents_orchestrator/compat.py src/ai_agents_orchestrator/medicao.py src/ai_agents_orchestrator/config.py
+        run: mypy --platform win32 src/ai_agents_orchestrator/lite.py src/ai_agents_orchestrator/ipc.py src/ai_agents_orchestrator/compat.py src/ai_agents_orchestrator/medicao.py src/ai_agents_orchestrator/config.py src/ai_agents_orchestrator/batchqueue.py
 
   secrets:
     runs-on: ubuntu-latest

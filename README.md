@@ -27,7 +27,7 @@ deployed without your explicit approval.
 [Telegram commands](#telegram-commands) · [CLI reference](#cli-reference) · [Configuration](#configuration) ·
 [FAQ](#faq) · [Limitations](#limitations) · [Roadmap](#roadmap) · [Glossary](#glossary)
 
-Start with the [Quickstart](#quickstart-lite-mode-121) just below, or [First 10 minutes](docs/first-10-minutes.md), with captured output from a credential-free run.
+Start with the [Quickstart](#quickstart-lite-mode-121) just below, or [First 10 minutes](docs/first-10-minutes.md), with captured output from a credential-free run. Running many lots in a row: [companion agent vs. queue script](docs/companion-vs-queue.md).
 See [honest comparison](docs/comparison.md), [version and support policy](docs/support-policy.md),
 [contributing](CONTRIBUTING.md), [conduct](CODE_OF_CONDUCT.md) and [security reports](SECURITY.md).
 
@@ -699,6 +699,7 @@ Use `aao --config PATH <command>` to select a config explicitly.
 | `delegate --repo R --title T [--files a,b] [--briefing FILE \| --briefing-text TXT] [--description D] [--priority N]` | queue a task for Codex |
 | `list [--state S] [--owner claude\|codex]`, `show ID`, `result ID [--short\|--full]`, `cancel ID`, `claim ID [--owner] [--files]` | board; `list` accepts `review`/`running` and returns English state labels; `result` defaults to short |
 | `wait ID [--timeout S]` | block until a final state (exit 0 review/completed, 1 blocked/cancelled, 2 timeout) |
+| `queue start LOTS_DIR` / `resume` / `status` / `stop` / `log` / `reviewed ID...` | script mode: runs Markdown lots through Codex one at a time with mechanical checks, pauses for review and on usage limits (no tokens while waiting); see [companion vs. queue](docs/companion-vs-queue.md) |
 | `review --repo R --branch B` | cross-review by Codex (read-only) |
 | `publish ID` | interactive human approval; lite: normal user types ID and full SHA; full: root types ID for a Claude-delegated task |
 | `watch [ID] [--no-follow]`, `watch-open [ID]` | live view |

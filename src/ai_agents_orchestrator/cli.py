@@ -441,6 +441,9 @@ def parser() -> argparse.ArgumentParser:
                     help="push the agent/* branch and open a pull request with gh instead of merging into the base")
     pb.add_argument("--approved-by-owner", "--autorizado-pelo-dono", dest="autorizado", action="store_true",
                     help="deprecated, ignored: the owner must confirm interactively")
+    qu = _sub(sp, "queue", help="run a folder of Markdown lots through Codex one at a time (script mode; no agent waits)")
+    from . import batchqueue
+    batchqueue.add_arguments(qu.add_subparsers(dest="queue_cmd", required=True, metavar="ACTION"))
     _sub(sp, "mcp", help="run a minimal MCP server on stdio (delegate, status, result, review; never publishes)")
     cl = _sub(sp, "claim", "reivindicar", help="take a task (default owner: claude)")
     cl.add_argument("id", type=int)
@@ -471,6 +474,9 @@ def main(argv=None) -> int:
         if a.output_dir is not None or a.repo_source is not None:
             parser().error("--output-dir and --repo-source require --non-interactive")
         return assistente.main()
+    if cmd == "queue":  # talks to the service only through the `aao` CLI, so it needs no config of its own
+        from . import batchqueue
+        return batchqueue.run(a)
     try:
         cfg = _cfg()
     except ValueError as error:

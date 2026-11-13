@@ -52,6 +52,14 @@ new subagents with a short briefing (objective, files, done criteria) over forki
 fork rereads all context. Parallel work: at most 2, on non-overlapping files, one worktree each, one agent merges.
 At about 70% of one weekly quota, check `aao claude-usage` and hand work to the other engine before it runs out.
 
+## Long streams of lots
+
+Two ways to run many lots in a row; pick one per stream. Companion agent mode (`companion-agent.md`): a subagent
+follows the worker, reviews each lot and decides what is next, good when outcomes change the plan but costs tokens
+while it waits. Script mode (`aao queue`): a script runs one lot at a time with mechanical checks and costs no tokens
+while waiting, good for predictable lots. Recommended hybrid: the script drives, an agent reviews at the pause points
+(`NEEDS_REVIEW.md`). See `docs/companion-vs-queue.md`.
+
 ## Wait, do not poll
 
 When the task ends, the service tells you: through the hook note on your next prompt, or, if the operator enabled the

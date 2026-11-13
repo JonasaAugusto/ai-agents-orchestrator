@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `aao queue` (script mode): runs a folder of Markdown lots through Codex one at a time, with `start`, `resume`, `status`, `stop`, `log` and `reviewed`. It uses only the `aao` CLI and `git`; after each task it checks mechanically (no error, branch and commits exist, CHANGELOG touched, no secret files or tokens in the diff, green tests, and with `--forbid-ai-mentions` no co-author or tool mention in commit messages), sends a failing lot back once, then marks it `blocked` and skips its dependents. It pauses every N ready lots (`NEEDS_REVIEW.md`), stops on a Codex usage limit and resumes without repeating lots. Never merges, publishes, pushes or deploys.
+- Skill file `companion-agent.md` (companion agent mode): one agent follows the other, in both directions, with the procedure, review rules, stop criteria, a prompt template per direction and when not to use it.
+- `docs/companion-vs-queue.md` (and pt-BR): when to use each and the recommended hybrid (script drives, agent reviews at the pause points); `examples/queue-lots/`.
+
+### Changed
+- `spend-policy.md` and the skill's `SKILL.md` point long streams of lots to the queue script and keep agents for review, because waiting costs tokens.
+
 ## [1.4.0] - 2026-11-12
 
 ### Added
