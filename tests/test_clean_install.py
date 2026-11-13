@@ -26,7 +26,6 @@ class UnattendedSetup(unittest.TestCase):
             return cli.main(["setup", "--non-interactive", *args])
 
     @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
-    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_writes_isolated_restricted_config_without_secrets(self):
         self.assertEqual(self.setup_cli("--output-dir", str(self.dest), "--repo-source", str(ROOT)), 0)
         cfg = config.carregar(env={}, arquivo=self.dest / "config.toml")
@@ -53,6 +52,14 @@ class UnattendedSetup(unittest.TestCase):
         private.assert_called()
         self.assertTrue((self.dest / "config.toml").is_file())
 
+    def test_setup_survives_an_environment_without_user_variables(self):
+        bare = {k: v for k, v in os.environ.items() if k not in ("USER", "LOGNAME", "USERNAME", "LNAME")}
+        with mock.patch.dict("sys.modules", {"pwd": None}), mock.patch.object(assistente.compat, "WINDOWS", True), \
+                mock.patch.object(assistente.compat, "private"), mock.patch.dict(os.environ, bare, clear=True), \
+                mock.patch.object(assistente.getpass, "getuser", side_effect=OSError("No username set in the environment")):
+            self.assertEqual(self.setup_cli("--output-dir", str(self.dest)), 0)
+        self.assertTrue((self.dest / "config.toml").is_file())
+
     def test_output_directory_required_no_default_write(self):
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit) as raised:
@@ -73,7 +80,6 @@ class UnattendedSetup(unittest.TestCase):
         self.assertEqual(list(self.dest.iterdir()), [marker])
 
     @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
-    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_refuses_shared_writable_directory(self):
         self.dest.mkdir(mode=0o777)
         self.dest.chmod(0o777)
@@ -145,7 +151,6 @@ class PluginValidation(unittest.TestCase):
 
 class CleanEnvironment(unittest.TestCase):
     @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
-    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_drops_credentials_and_config_overrides(self):
         from scripts.clean_install_test import isolated_environment
         with mock.patch.dict(os.environ, {"AAO_CONFIG": "/do-not-read", "OPENAI_API_KEY": "fake-key",

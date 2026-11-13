@@ -278,7 +278,10 @@ def nao_interativo(destino: Path, fonte: Path | None = None) -> int:
         return 1
     destino.mkdir(parents=True, exist_ok=True, mode=0o700)
     if compat.WINDOWS:
-        usuario = getpass.getuser()
+        try:
+            usuario = getpass.getuser()
+        except (OSError, KeyError, ImportError):  # no USER/LOGNAME in a bare environment
+            usuario = os.environ.get("USERNAME") or "user"
     else:
         import pwd
         usuario = pwd.getpwuid(os.geteuid()).pw_name
