@@ -19,7 +19,7 @@ from unittest import mock
 from ai_agents_orchestrator import assistente, cli, espelho, root_daemon as rd, watch, workspace
 from ai_agents_orchestrator.config import PACKAGE_DIR, Config
 from ai_agents_orchestrator.engines import Resultado
-from tests.helpers import Base, sh
+from tests.helpers import Base, sh, needs_root
 from tests.test_doctor_setup import AmbienteFalso
 
 
@@ -57,6 +57,7 @@ class EspelhoRootNaoLeConfigDoServico(unittest.TestCase):
         mock.patch.object(espelho, "_url_github", lambda s: str(self.gh)).start()
         mock.patch.object(espelho, "_como_root", lambda: True, create=True).start()
 
+    @needs_root
     def test_hook_e_config_plantados_no_espelho_do_servico_nao_rodam_como_root(self):
         self.assertTrue(espelho.atualizar_repos(self.cfg)["r"]["ok"])
         dst = self.cfg.repos_dir / "r.git"
@@ -236,11 +237,13 @@ class PublicarExigeConfirmacao(Base):
         self.assertFalse(self.publicado())
         self.assertIn("interactive terminal", out)
 
+    @needs_root
     def test_id_errado_no_terminal_nao_publica(self):
         rc, _ = self.pub(interativo=True, digitado=str(self.tid + 1))
         self.assertEqual(rc, 2)
         self.assertFalse(self.publicado())
 
+    @needs_root
     def test_dono_digita_o_id_no_terminal_e_publica(self):
         rc, _ = self.pub(autorizado=False, interativo=True, digitado=str(self.tid))
         self.assertEqual(rc, 0)

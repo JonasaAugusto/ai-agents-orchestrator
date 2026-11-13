@@ -24,4 +24,4 @@ The extra service, root daemon and configuration are real adoption costs. For a 
 start with a smaller integration if that meets your needs.
 
 
-Back to the [README](../README.md#quickstart-lite-mode-121) · [support policy](support-policy.md).
+Back to the [README](../README.md#quickstart-lite-mode) · [support policy](support-policy.md).

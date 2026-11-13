@@ -10,7 +10,7 @@ from unittest import mock
 
 from ai_agents_orchestrator import espelho, workspace
 from ai_agents_orchestrator.config import Config
-from tests.helpers import sh
+from tests.helpers import sh, needs_root
 
 
 def repo_com(d: Path, nome: str, arquivo: str) -> Path:
@@ -24,6 +24,7 @@ def repo_com(d: Path, nome: str, arquivo: str) -> Path:
 
 
 class EspelhoGithubTest(unittest.TestCase):
+    @needs_root
     def test_github_vence_copia_local_velha_e_local_so_sem_rede(self):
         with tempfile.TemporaryDirectory() as t:
             d = Path(t)

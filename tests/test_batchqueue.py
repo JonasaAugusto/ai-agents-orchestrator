@@ -279,15 +279,84 @@ class QueueTests(unittest.TestCase):
             q.check_limit()
 
     def test_failed_status_is_an_error_not_availability(self):
-        class Bad:
-            def status(self):
-                return batchqueue.AaoCli.status(self)
+        class Bad(batchqueue.AaoCli):
+            retry_delay = 0
+
+            def __init__(self):
+                pass
+
             def call(self, *a):
                 return {"ok": False, "erro": "daemon down"}
         q = batchqueue.Queue(self.work, cli=Bad(), poll=0)
         q.state = {"settings": {}}
         with self.assertRaises(RuntimeError):
             q.wait_free([])
+
+    # --- audit 1.5.1
+    def test_when_accepts_the_status_format_and_the_scheduled_format(self):
+        future = batchqueue.now() + batchqueue.timedelta(hours=3)
+        for text in (future.strftime("%Y-%m-%d %H:%M"), future.strftime("%d/%m %H:%M")):
+            when = batchqueue.Queue.parse_when(text)
+            self.assertIsNotNone(when, text)
+            self.assertAlmostEqual(when.timestamp(), future.replace(second=0, microsecond=0).timestamp(), delta=60)
+            self.assertEqual(batchqueue._when("limit until " + text), text)
+        self.assertIsNone(batchqueue.Queue.parse_when("unknown time"))
+        self.assertIsNone(batchqueue.Queue.parse_when("2026-13-45 99:99"))
+        q = batchqueue.Queue(self.work, poll=0)
+        self.assertIsNotNone(q.active_limit({"codex_limite_ate": future.strftime("%Y-%m-%d %H:%M")}))
+        past = (batchqueue.now() - batchqueue.timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
+        self.assertIsNone(q.active_limit({"codex_limite_ate": past}))
+
+    def test_transient_aao_failures_are_retried_with_a_limit(self):
+        class Flaky(batchqueue.AaoCli):
+            retry_delay = 0
+
+            def __init__(self, failures):
+                self.failures, self.calls = failures, 0
+
+            def call(self, *a):
+                self.calls += 1
+                if self.calls <= self.failures:
+                    raise subprocess.TimeoutExpired("aao", 120)
+                return {"ok": True, "tarefa": {"estado": "ok"}, "fila": 0}
+
+        ok = Flaky(2)
+        self.assertEqual(ok.status()["fila"], 0)
+        self.assertEqual(ok.calls, 3)
+        self.assertEqual(Flaky(2).show(7), {"estado": "ok"})
+        dead = Flaky(99)
+        with self.assertRaises(RuntimeError) as raised:
+            dead.status()
+        self.assertEqual(dead.calls, 3)
+        self.assertIn("after 3 attempts", str(raised.exception))
+
+    def test_a_timeout_pauses_the_queue_with_an_error_instead_of_a_traceback(self):
+        with self.env("happy"):
+            self.start()
+            data = json.loads((self.work / "state.json").read_text())
+            data["lots"]["L3"]["state"] = "pending"
+            data["ready_since_review"] = 0
+            (self.work / "state.json").write_text(json.dumps(data))
+
+            class Hung:
+                def status(self):
+                    raise subprocess.TimeoutExpired("aao", 120)
+
+            q = batchqueue.Queue(self.work, cli=Hung(), poll=0)
+            self.assertEqual(q._loop(), 2)
+        self.assertTrue(json.loads((self.work / "state.json").read_text())["pause"]["why"].startswith("error:"))
+
+    def test_missing_base_is_an_error_not_a_failed_lot(self):
+        with self.env("happy"):
+            rc, out = self.start("--base", "nope")
+        self.assertEqual(rc, 2)
+        self.assertIn("does not exist", out)
+        self.assertFalse((self.work / "state.json").exists())
+        subprocess.run(["git", "-C", str(self.repo), "branch", "feature"], check=True)
+        with self.assertRaises(RuntimeError):
+            batchqueue.git_info(str(self.repo), "feature", "nope")
+        info = batchqueue.git_info(str(self.repo), "feature", "main")
+        self.assertTrue(info["exists"])
 
 
 class CliWiring(unittest.TestCase):

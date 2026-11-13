@@ -3,7 +3,7 @@ import time
 
 from ai_agents_orchestrator import engines, historico
 from ai_agents_orchestrator.engines import Resultado
-from tests.helpers import Base
+from tests.helpers import Base, needs_root
 from tests.test_chat import edita
 
 
@@ -20,6 +20,7 @@ class Reinicio(Base):
         self.assertIn("SIGTERM", m)
         self.assertIn("service restart", m)
 
+    @needs_root
     def test_sigterm_durante_execucao_drena_e_conclui(self):
         iniciou, solta = threading.Event(), threading.Event()
 
@@ -45,6 +46,7 @@ class Reinicio(Base):
         self.assertIsNone(self.estado.get("retomar"))
         self.assertTrue(any("Feito" in t for t in self.tr.textos()))
 
+    @needs_root
     def test_morte_forcada_retoma_uma_vez(self):
         morto = Resultado(ok=False, exit_code=-15, thread_id="TC1", erro="")
         self.codex.respostas = [morto]

@@ -23,4 +23,4 @@ Um agente root pode burlar a aprovação da aplicação e o isolamento entre pro
 Serviço, daemon root e configuração têm custo de adoção; uma integração menor pode atender melhor uma sessão de revisão.
 
 
-Voltar ao [README](../README.pt-BR.md#início-rápido-modo-leve-121) · [política de suporte](support-policy.pt-BR.md).
+Voltar ao [README](../README.pt-BR.md#início-rápido-modo-leve) · [política de suporte](support-policy.pt-BR.md).

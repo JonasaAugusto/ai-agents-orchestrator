@@ -1,5 +1,6 @@
 import sys
 import unittest
+from tests.helpers import needs_root
 if sys.platform == "win32":
     raise unittest.SkipTest('Linux root daemon: uid switching, SO_PEERCRED, root-owned deployment scripts')
 
@@ -45,12 +46,14 @@ class Publicar(Base):
                     "acoes_extras": {"restart-api": {"argv": ["/usr/bin/touch", str(self.marca) + "-api"]}},
                     "scripts": [str(self.script)]}
 
+    @needs_root
     def test_assinatura_valida_executa_so_o_comando_da_allowlist(self):
         r = rd.publicar(self.cfg, self.pedido(), CHAVE, self.man)
         self.assertTrue(r["ok"])
         self.assertTrue(self.marca.exists())
         self.assertIn("publicar", (self.cfg.shared_state / "private" / "auditoria-root.jsonl").read_text())
 
+    @needs_root
     def test_assinatura_invalida_expirado_e_replay(self):
         p = self.pedido()
         p["mac"] = "0" * 64
@@ -62,6 +65,7 @@ class Publicar(Base):
         self.assertEqual(rd.publicar(self.cfg, {"repo": "x"}, CHAVE, self.man)["erro"], "malformed request")
         self.assertFalse(rd.publicar(self.cfg, self.pedido(nonce="v"), b"", self.man)["ok"])  # sem chave nada passa
 
+    @needs_root
     def test_acao_fora_da_allowlist_ou_repo_sem_deploy(self):
         self.assertEqual(rd.publicar(self.cfg, self.pedido(acao="rm -rf /", nonce="a"), CHAVE, self.man)["erro"], "action not in allowlist")
         self.assertEqual(rd.publicar(self.cfg, self.pedido(repo="api", nonce="b"), CHAVE, self.man)["erro"], "action not in allowlist")
@@ -79,6 +83,7 @@ class Publicar(Base):
         os.chmod(self.script, 0o777)  # gravavel por todos: recusa
         self.assertEqual(rd.publicar(self.cfg, self.pedido(acao=f"script:{self.script}", nonce="s3"), CHAVE, self.man)["erro"], "action not in allowlist")
 
+    @needs_root
     def test_acao_extra_nomeada(self):
         self.assertTrue(rd.publicar(self.cfg, self.pedido(acao="extra:restart-api", nonce="e1"), CHAVE, self.man)["ok"])
         self.assertEqual(rd.publicar(self.cfg, self.pedido(acao="extra:shell", nonce="e2"), CHAVE, self.man)["erro"], "action not in allowlist")
@@ -233,6 +238,7 @@ class Push(Base):
     def audit(self):
         return (self.cfg.shared_state / "private" / "auditoria-root.jsonl").read_text()
 
+    @needs_root
     def test_push_de_branch_funciona_e_e_auditado(self):
         r = rd.push(self.cfg, self.req())
         self.assertTrue(r["ok"], r)
@@ -240,6 +246,7 @@ class Push(Base):
         self.assertIn('"op": "push"', self.audit())
         self.assertIsNone(self.remoto("refs/tags/x"))
 
+    @needs_root
     def test_recusas(self):
         antes = self.remoto("refs/heads/main")
         for kw, msg in [({"repo": "empresa"}, "repo not allowed"), ({"branch": "main"}, "branch outside"),
@@ -268,6 +275,7 @@ class Push(Base):
         self.cfg.push_allowlist = []  # empty allowlist (the default): nothing can be pushed
         self.assertIsNone(rd.url_do_repo(self.cfg, "y"))
 
+    @needs_root
     def test_nunca_force_branch_divergente_e_recusado_pelo_remoto(self):
         self.assertTrue(rd.push(self.cfg, self.req())["ok"])
         _sh("git", "reset", "-q", "--hard", "HEAD~1", cwd=self.ws)
@@ -279,6 +287,7 @@ class Push(Base):
         self.assertFalse(r["ok"])
         self.assertEqual(self.remoto("refs/heads/agent/7-x"), antes)  # sem force, o remoto fica intacto
 
+    @needs_root
     def test_base_exige_assinatura_e_faz_merge_fast_forward(self):
         r = rd.push(self.cfg, self.req(modo="base"), CHAVE)
         self.assertEqual(r["erro"], "invalid approved commit")
@@ -293,6 +302,7 @@ class Push(Base):
         self.assertEqual(rd.push(self.cfg, self.assinado(nonce="ok1"), CHAVE)["erro"], "request already used")
         self.assertIsNone(self.remoto("refs/heads/agent/7-x"))  # modo base nao cria o branch
 
+    @needs_root
     def test_base_remota_avancou_integra_sobre_a_base_atual_e_conflito_nao_publica(self):
         outro = self.d / "outro"
         _sh("git", "clone", "-q", str(self.gh), str(outro))
@@ -316,6 +326,7 @@ class Push(Base):
         self.assertIn("conflict", r["erro"])
         self.assertEqual(self.remoto("refs/heads/main"), antes)
 
+    @needs_root
     def test_token_nunca_aparece_em_saida_nem_auditoria(self):
         self.assertEqual(rd._limpar(f"fatal: https://x-access-token:{TOKEN_FALSO}@github.com/a password={TOKEN_FALSO} {TOKEN_FALSO}").count("Z" * 10), 0)
         # remoto inexistente: a mensagem de erro do git passa por _limpar e a auditoria nao carrega segredo
@@ -327,6 +338,7 @@ class Push(Base):
         import inspect
         self.assertNotIn("/root/.env", inspect.getsource(rd))
 
+    @needs_root
     def test_processar_roteia_push_e_exige_uid_do_agente(self):
         self.assertEqual(rd.processar(self.cfg, self.req(op="push"), 12345, 980, CHAVE)["erro"], "uid not authorized")
         r = rd.processar(self.cfg, self.req(op="push"), 980, 980, CHAVE)

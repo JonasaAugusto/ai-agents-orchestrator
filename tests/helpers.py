@@ -14,6 +14,20 @@ from ai_agents_orchestrator.bot import Bot
 from ai_agents_orchestrator.telegram import Telegram
 from ai_agents_orchestrator.testing import CodexFalso, RootFalso
 
+
+
+def _root_with_root_owned_temp() -> bool:
+    """The privileged-state tests need uid 0 and a temp directory whose every parent is root-owned (CI: sudo, TMPDIR=/tmp)."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return False
+    here = Path(tempfile.gettempdir()).resolve()
+    return all(p.stat().st_uid == 0 for p in (here, *here.parents))
+
+
+needs_root = unittest.skipUnless(
+    _root_with_root_owned_temp(),
+    "needs root and a root-owned temp directory (privileged state checks); run `sudo env TMPDIR=/tmp python -m unittest`")
+
 TOKEN = "123456789:" + "A" * 35  # token sintetico
 CHAT = 424242
 

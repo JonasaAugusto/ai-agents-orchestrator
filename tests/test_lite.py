@@ -497,6 +497,35 @@ class LiteWorkflow(Base):
         self.assertTrue(self.svc.parar_ev.is_set())
         self.assertFalse(thread.is_alive())
 
+    @unittest.skipIf(compat.WINDOWS, "AF_UNIX pathname limit; Windows uses TCP and a user endpoint file")
+    def test_serve_with_failing_socket_joins_threads_before_closing_the_database(self):
+        import faulthandler
+        faulthandler.enable()  # a crash inside sqlite would abort the whole run with a traceback instead of passing
+        self.cfg.socket = self.dir / ("x" * 120)
+        self.svc.sem_telegram, self.svc.tg = True, None
+        baseline = set(threading.enumerate())
+        alive_at_close = []
+
+        class Watched:
+            def __init__(self, real):
+                self.real = real
+
+            def close(self):
+                alive_at_close.extend(t for t in threading.enumerate() if t not in baseline and t.is_alive())
+                self.real.close()
+
+            def __getattr__(self, name):
+                return getattr(self.real, name)
+
+        self.svc.estado.c = Watched(self.svc.estado.c)
+        self.svc.quadro.c = Watched(self.svc.quadro.c)
+        out = io.StringIO()
+        with patch.object(compat, "euid", return_value=1000), patch.object(cli, "montar_servico", return_value=self.svc), \
+                patch("sys.stdout", out):
+            self.assertEqual(lite.serve(self.cfg), 1)
+        self.assertEqual(alive_at_close, [])
+        self.assertIn("path too long", out.getvalue().lower())  # the real OSError text, not a generic hint
+
 
 @unittest.skipIf(compat.WINDOWS, "BSD/macOS getpeereid compatibility; no Unix peer API on Windows")
 class PortablePeer(unittest.TestCase):

@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 from ai_agents_orchestrator.engines import Resultado
-from tests.helpers import Base, sh
+from tests.helpers import Base, sh, needs_root
 
 
 def edita(nome="mudanca.py", conteudo="print('chat')\n", texto="Feito: ajustei."):
@@ -21,6 +21,7 @@ class ChatEditavel(Base):
         super().setUp()
         self.gh = self.criar_repo()
 
+    @needs_root
     def test_edicao_gera_commit_branch_push_e_botoes(self):
         self.codex.respostas = [edita()]
         self.bot.processar(self.msg("ajusta o app do web-app"))
@@ -106,6 +107,7 @@ class ChatEditavel(Base):
         self.assertFalse([c for c in self.root.chamadas if c[0] == "push_base"])
         self.assertIn("Publish", [r for r, _ in self.botoes_enviados()])
 
+    @needs_root
     def test_botao_publicar_faz_push_base_e_encerra_sessao(self):
         self.codex.respostas = [edita(), edita("outra.py")]
         self.bot.processar(self.msg("ajusta no web-app"))
@@ -117,6 +119,7 @@ class ChatEditavel(Base):
         self.bot.processar(self.msg("outra no web-app"))
         self.assertEqual(len(self.quadro.listar()), 2)
 
+    @needs_root
     def test_descartar_encerra_sem_publicar(self):
         self.codex.respostas = [edita()]
         self.bot.processar(self.msg("ajusta no web-app"))

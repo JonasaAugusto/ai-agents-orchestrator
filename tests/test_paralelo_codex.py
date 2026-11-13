@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from ai_agents_orchestrator import config, servico, workspace
 from ai_agents_orchestrator.engines import Resultado
-from tests.helpers import Base, sh
+from tests.helpers import Base, sh, needs_root
 
 OK = "Feito: novo.py. Testes: ok. Falta: nada. Para o Claude: nada."
 
@@ -170,6 +170,7 @@ class Paralelo(Base):
         self.assertTrue(runner.cancelado)
         self.svc._paralelas.clear()
 
+    @needs_root
     def test_merges_into_the_base_are_serial(self):
         ids = []
         for n in ("a", "b"):

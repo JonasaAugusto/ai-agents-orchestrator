@@ -22,16 +22,16 @@ deployed without your explicit approval.
 ## Contents
 
 [How it works](#how-it-works) · [Features](#features) · [Permission modes](#permission-modes) · [Security model](#security-model) · [Who orchestrates](#who-orchestrates) ·
-[Quickstart](#quickstart-lite-mode-121) · [Comparison](docs/comparison.md) · [Support](docs/support-policy.md) · [Tutorial](#tutorial-your-first-task) · [Design decisions](#design-decisions) ·
+[Quickstart](#quickstart-lite-mode) · [Comparison](docs/comparison.md) · [Support](docs/support-policy.md) · [Tutorial](#tutorial-your-first-task) · [Design decisions](#design-decisions) ·
 [Claude Code plugin](#claude-code-plugin) · [Cost and balancing](#cost-and-balancing) · [Watching Codex live](#watching-codex-live) · [Chat channels](#chat-channels) ·
 [Telegram commands](#telegram-commands) · [CLI reference](#cli-reference) · [Configuration](#configuration) ·
 [FAQ](#faq) · [Limitations](#limitations) · [Roadmap](#roadmap) · [Glossary](#glossary)
 
-Start with the [Quickstart](#quickstart-lite-mode-121) just below, or [First 10 minutes](docs/first-10-minutes.md), with captured output from a credential-free run. Running many lots in a row: [companion agent vs. queue script](docs/companion-vs-queue.md).
+Start with the [Quickstart](#quickstart-lite-mode) just below, or [First 10 minutes](docs/first-10-minutes.md), with captured output from a credential-free run. Running many lots in a row: [companion agent vs. queue script](docs/companion-vs-queue.md).
 See [honest comparison](docs/comparison.md), [version and support policy](docs/support-policy.md),
 [contributing](CONTRIBUTING.md), [conduct](CODE_OF_CONDUCT.md) and [security reports](SECURITY.md).
 
-## Quickstart: lite mode (1.5.0)
+## Quickstart: lite mode
 
 On Linux, macOS or Windows, with Python 3.11+, Git 2.38+, Codex CLI and Claude Code installed,
 run this as your normal user:
@@ -309,7 +309,7 @@ secrets out of reach, and keep the publish allowlist short.
 ## Security model
 
 These are full-mode defaults with restricted Codex permissions; [Permission modes](#permission-modes) explains
-how to relax them. Lite's different trust model is described in its [quickstart](#quickstart-lite-mode-121).
+how to relax them. Lite's different trust model is described in its [quickstart](#quickstart-lite-mode).
 
 | Default | Why |
 | --- | --- |
@@ -451,7 +451,7 @@ Try it without any account: `aao serve --dry-run` uses fake engines and no chat 
 
 ## Tutorial: your first task
 
-1. **Install and configure** with the [lite Quickstart](#quickstart-lite-mode-121) or the [full-mode Quickstart](#quickstart-full-mode). In `aao setup` choose the orchestrator, the Codex
+1. **Install and configure** with the [lite Quickstart](#quickstart-lite-mode) or the [full-mode Quickstart](#quickstart-full-mode). In `aao setup` choose the orchestrator, the Codex
    permissions ([modes](#permission-modes)), the chat channel and your repositories.
 2. **Log in to Codex** as the service user and install the Claude Code plugin (see the Quickstart steps).
 3. **Check** with `aao doctor` and fix anything it flags; `aao status --brief` shows the five-line summary.
@@ -724,6 +724,23 @@ and `local = true` for repositories without a remote. Deploy commands live in a 
 Lite mode: `[lite] transcripts_project` (or `AAO_LITE_TRANSCRIPTS_PROJECT`) names the project folder whose Claude Code
 transcripts the mirror reads (a project path, or the encoded folder name under `paths.claude_transcripts`). Without it,
 the folder where `aao serve` runs is used. `aao setup` asks for it and `aao doctor` checks it.
+
+Publishing over SSH (lite): `[publish] push_url_scheme = "https"` (default) or `"ssh"`. With `"ssh"`, publishing and
+fetching use `git@github.com:owner/repo.git`, for people who authenticate with an SSH key instead of an HTTPS token.
+
+Other environment variables (all optional):
+
+| Variable | Meaning |
+| --- | --- |
+| `AAO_MODE` | `lite` or `full`; overrides `mode` in the config (default: `lite` on Windows, `full` elsewhere) |
+| `AAO_SOCKET` | Path of the local CLI socket, overriding `paths.socket` at run time |
+| `AAO_PATHS_SOCKET`, `AAO_PATHS_CLAUDE_MEMORY` | Same as the `paths.socket` and `paths.claude_memory` keys (an explicit value disables the lite-mode default) |
+| `AAO_CLAUDE_PROBE_MINUTES` | Same as `claude.probe_minutes`, the interval of the Claude usage probe (lite default: 60) |
+| `AAO_TELEGRAM_CHAT_ID` | Same as `telegram.chat_id` |
+| `AAO_ENV_FILE` | Full mode: file holding the service secrets (default `/etc/ai-agents-orchestrator/env`) |
+| `AAO_DEV_TREE` | Full mode: the Git checkout you review and merge into (default `/srv/ai-agents-orchestrator`) |
+| `AAO_INSTALLED` | Full mode: the root-owned installed copy that actually runs (default `/opt/ai-agents-orchestrator`) |
+| `AAO_QUEUE_CLI`, `AAO_QUEUE_POLL`, `AAO_QUEUE_NOTIFY` | `aao queue`: the `aao` command to call, the poll interval in seconds, and a notification command |
 
 ## FAQ
 

@@ -36,4 +36,4 @@ CI also builds a wheel/sdist and exercises both with `--distribution`, and runs 
 slim containers. See [CONTRIBUTING](../CONTRIBUTING.md) for the scope of lint/type checks.
 
 
-Back to the [README](../README.md#quickstart-lite-mode-121) · [honest comparison](comparison.md).
+Back to the [README](../README.md#quickstart-lite-mode) · [honest comparison](comparison.md).

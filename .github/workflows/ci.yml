@@ -93,9 +93,84 @@ jobs:
       - run: python -m pip install '.[dev]'
       - run: ruff check .
       - run: mypy
+      - name: Release files name one version, and the CHANGELOG has notes for it
+        run: python scripts/check_release.py
+      - name: No private paths, personal mailboxes or chat ids in tracked files
+        run: python scripts/check_private_paths.py
       # Windows-only branches (ctypes, msvcrt, no AF_UNIX) are only visible when type-checking for that platform.
       - name: mypy for Windows (portable modules)
         run: mypy --platform win32 src/ai_agents_orchestrator/lite.py src/ai_agents_orchestrator/ipc.py src/ai_agents_orchestrator/compat.py src/ai_agents_orchestrator/medicao.py src/ai_agents_orchestrator/config.py src/ai_agents_orchestrator/batchqueue.py
+
+  # No USER, LANG, TZ or tokens: what a stranger's shell may well look like. Passing here is what keeps a test from
+  # depending on the runner by accident.
+  clean-env:
+    name: Empty environment (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install .
+      - name: Unit tests under `env -i`
+        run: |
+          mkdir -p "$RUNNER_TEMP/h/Local" "$RUNNER_TEMP/h/Roaming"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # (tests.test_windows starts PowerShell, which is too slow to cold-start without its own variables; it runs in `lite`.)
+            # Windows itself always provides these; the point is to drop everything else (tokens, CI markers, locale, TZ).
+            env -i SYSTEMROOT="$SYSTEMROOT" WINDIR="$WINDIR" COMSPEC="$COMSPEC" PATHEXT="$PATHEXT" PATH="$PATH" \
+              TEMP="$RUNNER_TEMP" TMP="$RUNNER_TEMP" USERNAME="$USERNAME" USERPROFILE="$RUNNER_TEMP\\h" \
+              LOCALAPPDATA="$RUNNER_TEMP\\h\\Local" APPDATA="$RUNNER_TEMP\\h\\Roaming" HOME="$RUNNER_TEMP/h" PYTHONUTF8=1 \
+              python -W ignore -m unittest tests.test_clean_install tests.test_lite tests.test_batchqueue tests.test_docs
+          else
+            env -i PATH="$PATH" HOME="$RUNNER_TEMP/h" TMPDIR="$RUNNER_TEMP" PYTHONUTF8=1 \
+              python -W ignore -m unittest tests.test_clean_install tests.test_lite tests.test_windows tests.test_batchqueue tests.test_docs
+          fi
+
+  # The first line of the README, exactly as a visitor runs it, but pinned to the commit under test.
+  pipx-from-github:
+    name: pipx install from GitHub (${{ matrix.os }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      PYTHONUTF8: "1"
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Isolated pipx directories
+        run: |
+          echo "PIPX_HOME=$RUNNER_TEMP/aao-pipx" >> "$GITHUB_ENV"
+          echo "PIPX_BIN_DIR=$RUNNER_TEMP/aao-bin" >> "$GITHUB_ENV"
+      - name: pipx install git+URL@SHA
+        run: |
+          python -m pip install pipx
+          python -m pipx install "git+https://github.com/${GITHUB_REPOSITORY}@${SOURCE_SHA}"
+          echo "$RUNNER_TEMP/aao-bin" >> "$GITHUB_PATH"
+      - name: Installed CLI runs, sets up and checks itself
+        run: |
+          aao --version
+          aao setup --non-interactive --output-dir "$RUNNER_TEMP/aao-demo"
+          test -f "$RUNNER_TEMP/aao-demo/config.toml"
+          rc=0; AAO_CONFIG="$RUNNER_TEMP/aao-demo/config.toml" aao doctor || rc=$?
+          test "$rc" -le 1
 
   secrets:
     runs-on: ubuntu-latest

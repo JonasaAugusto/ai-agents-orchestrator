@@ -103,14 +103,12 @@ class CenariosNegativos(unittest.TestCase):
                         self.assertIn(f"contradictory access: {caminho}", self.verificar(texto.replace("`", "")))
 
     @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
-    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_negar_sozinho_nao_e_erro(self):
         self.assertEqual(self.verificar("Never read `/root`."), [])
         self.assertEqual(self.verificar("Full access to /root and /etc."), [])
         self.assertEqual(self.verificar("Secrets: never print the content of files under /root."), [])
 
     @unittest.skipIf(sys.platform == "win32", "full mode and the rules checker target Linux; Windows runs lite")
-    @unittest.skipIf(sys.platform == "win32", "Linux-only: POSIX paths, pwd/uid or full mode")
     def test_caminhos_relativos_absolutos_e_parametrizados(self):
         script = self.raiz / "scripts" / "verificar.py"
         script.parent.mkdir()

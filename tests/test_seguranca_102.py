@@ -18,7 +18,7 @@ from unittest import mock
 from ai_agents_orchestrator import doctor, espelho, root_daemon as rd, sanitize, workspace
 from ai_agents_orchestrator.config import Config
 from ai_agents_orchestrator.whatsapp import WhatsApp, LimiteEnvio
-from tests.helpers import Base, sh
+from tests.helpers import Base, sh, needs_root
 from tests.test_seguranca_101 import repo_com
 from tests.test_whatsapp import ClienteFalso
 
@@ -32,6 +32,7 @@ class Files(unittest.TestCase):
                           fonte_transcripts=self.d/'absent', fonte_memoria=self.d/'absent')
         self.cfg.state_dir.mkdir()
 
+    @needs_root
     def test_mirror_old_temp_symlink_does_not_overwrite(self):
         self.cfg.mirror.mkdir(parents=True)
         victim = self.d/'victim'
@@ -42,6 +43,7 @@ class Files(unittest.TestCase):
         self.assertEqual(victim.read_text(), 'original')
         self.assertEqual(json.loads((self.cfg.mirror/'hook-sinal.json').read_text())['error'], 'synthetic')
 
+    @needs_root
     def test_old_audit_symlink_does_not_append(self):
         victim = self.d/'victim'
         victim.write_text('original')
@@ -50,6 +52,7 @@ class Files(unittest.TestCase):
         self.assertEqual(victim.read_text(), 'original')
         self.assertNotEqual(self.cfg.mirror.parent, self.cfg.state_dir)
 
+    @needs_root
     def test_root_workspace_audit_does_not_append_to_service_symlink(self):
         self.cfg.logs.mkdir(parents=True)
         victim = self.d / 'victim'
@@ -67,6 +70,7 @@ class Files(unittest.TestCase):
             espelho.espelhar(self.cfg, com_repos=False)
         self.assertEqual(list(outside.iterdir()), [])
 
+    @needs_root
     def test_service_can_read_but_cannot_replace_mirror_parent(self):
         self.d.chmod(0o755)
         self.cfg.service_user = "daemon"
@@ -204,6 +208,7 @@ class Approval(Base):
             client.push_base('web-app', 1, self.branch, agora=1000)
         return captured
 
+    @needs_root
     def test_changed_branch_is_rejected_before_integration(self):
         request = self.request()
         (self.ws/'app.py').write_text('unreviewed\n')
@@ -223,6 +228,7 @@ class Approval(Base):
         self.assertNotIn('push', calls)
         self.assertEqual(sh('git','--git-dir',str(self.gh),'rev-parse','main').strip(), self.approved)
 
+    @needs_root
     def test_destination_tamper_invalidates_signature(self):
         request = self.request()
         self.cfg.repos['web-app']['branch_base'] = 'release'

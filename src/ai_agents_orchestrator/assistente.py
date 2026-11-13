@@ -278,11 +278,14 @@ def nao_interativo(destino: Path, fonte: Path | None = None) -> int:
         return 1
     destino.mkdir(parents=True, exist_ok=True, mode=0o700)
     if compat.WINDOWS:
-        usuario = getpass.getuser()
+        try:
+            usuario = getpass.getuser()
+        except (OSError, KeyError, ImportError):  # no USER/LOGNAME in a bare environment
+            usuario = os.environ.get("USERNAME") or "user"
     else:
         import pwd
         usuario = pwd.getpwuid(os.geteuid()).pw_name
-    texto = gerar_toml({"channel": "none", "user": usuario, "timezone": "UTC",
+    texto = gerar_toml({"channel": "none", "user": usuario, "timezone": "UTC", "mode": "lite" if compat.WINDOWS or sys.platform != "linux" else "full",
                         "state_dir": str(destino / "state"), "claude_transcripts": str(destino / "transcripts"),
                         "allowlist": [], "repos": {"demo": {"source": str(fonte), "base_branch": "main", "local": True}}
                         if fonte else {}})

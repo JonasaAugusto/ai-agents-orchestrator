@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import compat, config, engines, gitseguro
+from . import __version__, compat, config, engines, gitseguro
 from .config import CLI, Config
 
 OK, AVISO, FALHA, INFO = "ok", "warn", "FAIL", "info"
@@ -188,7 +188,7 @@ def checar_claude(cfg: Config, amb: Ambiente, settings: list[Path] | None = None
     else:
         itens.append(Item("claude CLI", OK, "installed"))
     if set(HOOKS_ATUAIS) <= hooks_instalados(amb, settings):
-        itens.append(Item("claude hooks", OK, "all 1.1.0 handoff, prompt and usage hooks confirmed"))
+        itens.append(Item("claude hooks", OK, f"all {__version__} handoff, prompt and usage hooks confirmed"))
     else:
         itens.append(Item("claude hooks", AVISO, "current handoff, prompt and usage hooks not confirmed",
                           "Install the Claude Code plugin from claude-plugin/ (see README) or merge "
@@ -404,7 +404,7 @@ def checar_medicao(cfg: Config, amb: Ambiente | None = None, settings: list[Path
     achou = "Stop" in hooks_instalados(amb, settings)
     itens.append(Item("claude usage hook", OK if achou else AVISO,
                       "Stop counter hook found" if achou else "Stop counter hook not confirmed",
-                      "Update the plugin to 1.1.0 or merge examples/claude-hooks.json; Stop must run aao claude-usage." if not achou else ""))
+                      f"Update the plugin to {__version__} or merge examples/claude-hooks.json; Stop must run aao claude-usage." if not achou else ""))
     if cfg.db_estado.exists():
         try:
             with sqlite3.connect(cfg.db_estado.as_uri() + "?mode=ro", uri=True) as c:
