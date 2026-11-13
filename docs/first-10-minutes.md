@@ -138,7 +138,7 @@ and bundled rules; install the plugin separately from the marketplace/checkout w
   ```
 
   Then, in another terminal, `aao delegate --repo myrepo --title "Add a health check" --briefing-text "Add GET /health and a test."`.
-  See the [lite Quickstart](../README.md#quickstart-lite-mode-121) (including native Windows and WSL2). Configure only
+  See the [lite Quickstart](../README.md#quickstart-lite-mode) (including native Windows and WSL2). Configure only
   disposable repos first. Account authentication and actual plugin loading require your own session.
 - For the privileged full mode (Linux/systemd, remote Publish button), follow the
   [full-mode Quickstart](../README.md#quickstart-full-mode) and choose an unprivileged service user.

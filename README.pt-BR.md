@@ -20,10 +20,10 @@ publicado sem a sua aprovação explícita.
 
 Este arquivo é a versão em português do [README em inglês](README.md), seção por seção; se algo divergir, o inglês vale. Os apelidos de comandos e flags em português são só de compatibilidade.
 
-Comece pelo [Início rápido](#início-rápido-modo-leve-121) logo abaixo ou pelos [Primeiros 10 minutos](docs/first-10-minutes.md), com saída capturada sem credenciais. Vários lotes em sequência: [agente acompanhante vs. script de fila](docs/companion-vs-queue.pt-BR.md).
+Comece pelo [Início rápido](#início-rápido-modo-leve) logo abaixo ou pelos [Primeiros 10 minutos](docs/first-10-minutes.md), com saída capturada sem credenciais. Vários lotes em sequência: [agente acompanhante vs. script de fila](docs/companion-vs-queue.pt-BR.md).
 Veja também [contribuição](CONTRIBUTING.md), [conduta](CODE_OF_CONDUCT.md) e [segurança](SECURITY.md).
 
-## Início rápido: modo leve (1.5.0)
+## Início rápido: modo leve
 
 No Linux, macOS ou Windows, com Python 3.11+, Git 2.38+, Codex CLI e Claude Code instalados,
 execute como seu usuário normal:
@@ -301,7 +301,7 @@ sem supervisão, mantenha os segredos fora do alcance e a lista de publicação 
 ## Modelo de segurança (padrões)
 
 Estes são os padrões do modo completo com permissões restritas do Codex; os [Modos de permissão](#modos-de-permissão)
-explicam como relaxá-los. Os limites do modo leve estão no [início rápido](#início-rápido-modo-leve-121).
+explicam como relaxá-los. Os limites do modo leve estão no [início rápido](#início-rápido-modo-leve).
 
 Codex como usuário sem privilégio (`aao`), `workspace-write` **sem rede**; `danger-full-access` só com
 `codex.full_access = true` (opt-in explícito, com aviso); publicar sempre exige humano; nada vai ao GitHub fora de
@@ -383,7 +383,7 @@ nenhuma: `aao serve --dry-run`.
 
 ## Tutorial: a primeira tarefa
 
-1. **Instale e configure** pelo [Início rápido](#início-rápido-modo-leve-121) ou o [modo completo](#início-rápido-modo-completo). No `aao setup` escolha o orquestrador, as permissões do
+1. **Instale e configure** pelo [Início rápido](#início-rápido-modo-leve) ou o [modo completo](#início-rápido-modo-completo). No `aao setup` escolha o orquestrador, as permissões do
    Codex ([modos](#modos-de-permissão)), o canal de chat e os repositórios.
 2. **Faça o login do Codex** como o usuário do serviço e instale o plugin do Claude Code (passos do Início rápido).
 3. **Confira** com `aao doctor` e corrija o que ele apontar; `aao status --brief` mostra o resumo de cinco linhas.
@@ -623,6 +623,23 @@ e `local = true` para repositórios sem remoto. Os comandos de deploy ficam numa
 
 Modo leve: `[lite] transcripts_project` (ou `AAO_LITE_TRANSCRIPTS_PROJECT`) indica a pasta do projeto cujos transcripts
 do Claude Code o espelho lê. Sem ele, usa-se a pasta onde `aao serve` roda. `aao setup` pergunta e `aao doctor` confere.
+
+Publicação por SSH (modo leve): `[publish] push_url_scheme = "https"` (padrão) ou `"ssh"`. Com `"ssh"`, publicar e buscar
+usam `git@github.com:dono/repo.git`, para quem autentica com chave SSH em vez de token HTTPS.
+
+Outras variáveis de ambiente (todas opcionais):
+
+| Variável | Significado |
+| --- | --- |
+| `AAO_MODE` | `lite` ou `full`; sobrepõe `mode` na configuração (padrão: `lite` no Windows, `full` nos demais) |
+| `AAO_SOCKET` | Caminho do socket local da CLI, sobrepondo `paths.socket` em tempo de execução |
+| `AAO_PATHS_SOCKET`, `AAO_PATHS_CLAUDE_MEMORY` | Igual às chaves `paths.socket` e `paths.claude_memory` (um valor explícito desativa o padrão do modo leve) |
+| `AAO_CLAUDE_PROBE_MINUTES` | Igual a `claude.probe_minutes`, o intervalo da sonda de uso do Claude (padrão no modo leve: 60) |
+| `AAO_TELEGRAM_CHAT_ID` | Igual a `telegram.chat_id` |
+| `AAO_ENV_FILE` | Modo completo: arquivo com os segredos do serviço (padrão `/etc/ai-agents-orchestrator/env`) |
+| `AAO_DEV_TREE` | Modo completo: o checkout Git que você revisa e no qual faz o merge (padrão `/srv/ai-agents-orchestrator`) |
+| `AAO_INSTALLED` | Modo completo: a cópia instalada, de propriedade do root, que de fato executa (padrão `/opt/ai-agents-orchestrator`) |
+| `AAO_QUEUE_CLI`, `AAO_QUEUE_POLL`, `AAO_QUEUE_NOTIFY` | `aao queue`: o comando `aao` a chamar, o intervalo de consulta em segundos e um comando de notificação |
 
 ## FAQ
 

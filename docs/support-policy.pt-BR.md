@@ -22,4 +22,4 @@ O setup sem interação exige diretório do usuário atual, sem escrita para gru
 exclusiva, preservando arquivos existentes.
 
 
-Voltar ao [README](../README.pt-BR.md#início-rápido-modo-leve-121) · [comparação honesta](comparison.pt-BR.md).
+Voltar ao [README](../README.pt-BR.md#início-rápido-modo-leve) · [comparação honesta](comparison.pt-BR.md).

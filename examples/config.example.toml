@@ -105,6 +105,8 @@ push_allowlist = ["your-org/web-app"]
 manifest = "/etc/ai-agents-orchestrator/publish.json"   # deploy allowlist (see examples/publish.example.json)
 key_file = "/etc/ai-agents-orchestrator/publish.key"
 push_mode = "root"
+# Lite mode: "https" (default) or "ssh" (git@github.com:owner/repo.git) for publishing and fetching.
+push_url_scheme = "https"
 
 # Repositories Codex may work on. Alternatively: repos_file = "/etc/ai-agents-orchestrator/repos.json"
 [repos.web-app]
