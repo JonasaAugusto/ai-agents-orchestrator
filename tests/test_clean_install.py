@@ -51,6 +51,7 @@ class UnattendedSetup(unittest.TestCase):
             self.assertEqual(self.setup_cli("--output-dir", str(self.dest)), 0)
         private.assert_called()
         self.assertTrue((self.dest / "config.toml").is_file())
+        self.assertIn('mode = "lite"', (self.dest / "config.toml").read_text())  # full mode does not exist on Windows
 
     def test_setup_survives_an_environment_without_user_variables(self):
         bare = {k: v for k, v in os.environ.items() if k not in ("USER", "LOGNAME", "USERNAME", "LNAME")}

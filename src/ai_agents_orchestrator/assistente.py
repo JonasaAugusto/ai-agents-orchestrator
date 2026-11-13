@@ -285,7 +285,7 @@ def nao_interativo(destino: Path, fonte: Path | None = None) -> int:
     else:
         import pwd
         usuario = pwd.getpwuid(os.geteuid()).pw_name
-    texto = gerar_toml({"channel": "none", "user": usuario, "timezone": "UTC",
+    texto = gerar_toml({"channel": "none", "user": usuario, "timezone": "UTC", "mode": "lite" if compat.WINDOWS or sys.platform != "linux" else "full",
                         "state_dir": str(destino / "state"), "claude_transcripts": str(destino / "transcripts"),
                         "allowlist": [], "repos": {"demo": {"source": str(fonte), "base_branch": "main", "local": True}}
                         if fonte else {}})
