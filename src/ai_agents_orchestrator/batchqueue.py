@@ -57,6 +57,13 @@ DSN_HOST_OK = re.compile(r"localhost|127\.|::1|example|invalid|\.test$|fake|dumm
 DSN_PASS_OK = re.compile(r"^(password|pass|test|fake|dummy|changeme|x+|\*+|<.*>|\$\{?\w+\}?|%s|\{.*\})$", re.I)
 
 
+def split_command(text: str) -> list[str]:
+    """shlex.split that keeps Windows backslashes (posix mode would eat them)."""
+    if sys.platform != "win32":
+        return shlex.split(text)
+    return [part[1:-1] if len(part) > 1 and part[0] == part[-1] and part[0] in "\"'" else part for part in shlex.split(text, posix=False)]
+
+
 class LimitReached(Exception):
     def __init__(self, until: str | None = None, reason: str = ""):
         super().__init__(reason)
@@ -130,7 +137,7 @@ def load_lots(folder: Path) -> list[dict[str, Any]]:
 # ------------------------------------------------------------------ aao and git
 class AaoCli:
     def __init__(self) -> None:
-        self.cmd = shlex.split(os.environ.get("AAO_QUEUE_CLI", "aao"))
+        self.cmd = split_command(os.environ.get("AAO_QUEUE_CLI", "aao"))
 
     def call(self, *args: str) -> dict[str, Any]:
         proc = subprocess.run([*self.cmd, *args], capture_output=True, text=True, timeout=120)
@@ -254,7 +261,7 @@ class Queue:
         cmd = os.environ.get("AAO_QUEUE_NOTIFY")
         if cmd:
             try:
-                subprocess.run([*shlex.split(cmd), msg], capture_output=True, timeout=20)
+                subprocess.run([*split_command(cmd), msg], capture_output=True, timeout=20)
             except (OSError, subprocess.SubprocessError) as error:
                 self.log(f"notify hook failed: {error}")
 
