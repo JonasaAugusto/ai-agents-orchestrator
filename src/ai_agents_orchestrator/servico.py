@@ -1746,7 +1746,7 @@ class Servico:
         try:
             self._run_socket()
         except (OSError, ValueError) as e:
-            self.socket_error = f"local socket: {type(e).__name__} (check paths.socket and directory permissions)"
+            self.socket_error = f"local socket: {type(e).__name__}: {e} (check paths.socket and directory permissions)"
             self.parar_ev.set()
         finally:
             self.socket_ready.set()
@@ -1874,17 +1874,20 @@ class Servico:
                threading.Thread(target=self.run_timer, daemon=True)]
         for t in ths:
             t.start()
-        if not self.socket_ready.wait(10) or self.socket_error:
+        try:
+            if not self.socket_ready.wait(10) or self.socket_error:
+                self.parar()
+                raise OSError(self.socket_error or "local socket startup did not complete")
+            self.log("Orchestrator started." + (" Queue paused." if self.estado.get("pausado") else "")
+                     + ("" if not self.sem_telegram else " No chat channel: CLI/Claude Code only."))
+            if self.sem_telegram:
+                self.parar_ev.wait()
+            else:
+                self.run_telegram()
+            self.parar_suave()
+            self.drenar()
+        finally:
+            # The workers share the SQLite connections: they must be done before the caller closes them.
             self.parar()
-            raise OSError(self.socket_error or "local socket startup did not complete")
-        self.log("Orchestrator started." + (" Queue paused." if self.estado.get("pausado") else "")
-                 + ("" if not self.sem_telegram else " No chat channel: CLI/Claude Code only."))
-        if self.sem_telegram:
-            self.parar_ev.wait()
-        else:
-            self.run_telegram()
-        self.parar_suave()
-        self.drenar()
-        self.parar()
-        for t in ths:
-            t.join(20)
+            for t in ths:
+                t.join(20)
