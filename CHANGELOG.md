@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-13
+
 ### Fixed
 - `aao serve` (lite): when the local socket cannot start, the service threads are now joined before the shared SQLite connection is closed. Before, the process could end with a segmentation fault (exit 139) instead of exit 1.
 - The socket error now carries the real cause (for example `AF_UNIX path too long`) instead of a generic hint.
